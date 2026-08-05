@@ -75,7 +75,6 @@ pub fn run() {
             commands::analysis::analyze_assets,
             commands::publish::prepare_publish,
             commands::publish::list_drafts,
-            commands::publish::publish_file_selected,
             commands::publish::publish_confirmed,
             commands::publish::copy_to_clipboard,
             commands::tasks::list_tasks,

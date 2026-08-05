@@ -295,6 +295,45 @@ fn task_wait_for_human_persists_context_in_payload() {
 }
 
 #[test]
+fn task_update_payload_merges_stage_info_keeping_execution_fields() {
+    let db = test_db();
+    let repo = TasksRepo::new(&db);
+    let id = repo
+        .enqueue(
+            "publisher",
+            "prepare_publish",
+            serde_json::json!({ "draft_id": 4, "asset_id": 2 }),
+            true,
+        )
+        .expect("enqueue");
+    repo.claim_next("publisher").expect("claim").expect("some");
+    repo.update_payload(
+        id,
+        serde_json::json!({ "stage": "file", "title": "标题", "path": "videos/x.mp4" }),
+    )
+    .expect("update payload");
+    let t = repo.get(id).expect("get").expect("some");
+    assert_eq!(t.payload["draft_id"], 4);
+    assert_eq!(t.payload["asset_id"], 2);
+    assert_eq!(t.payload["stage"], "file");
+    assert_eq!(t.payload["title"], "标题");
+    assert_eq!(t.payload["path"], "videos/x.mp4");
+}
+
+#[test]
+fn task_running_can_be_cancelled_by_human() {
+    let db = test_db();
+    let repo = TasksRepo::new(&db);
+    let id = repo
+        .enqueue("publisher", "prepare_publish", serde_json::json!({}), true)
+        .expect("enqueue");
+    repo.claim_next("publisher").expect("claim").expect("some");
+    repo.cancel(id).expect("cancel running task");
+    let t = repo.get(id).expect("get").expect("some");
+    assert_eq!(t.status, TaskStatus::Cancelled);
+}
+
+#[test]
 fn draft_repo_create_list_and_status_flow() {
     use build_douyin_acount_lib::db::repos::drafts::DraftsRepo;
     use build_douyin_acount_lib::domain::draft::{DraftStatus, NewDraft};

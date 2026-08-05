@@ -69,6 +69,9 @@ impl<'a> AgentRuntime<'a> {
                 tasks.add_log(task.id, "WARN", &format!("task waiting for human: {ctx_data}"))?;
                 tasks.wait_for_human_with_context(task.id, ctx_data)?;
             }
+            Ok(AgentOutcome::Continue) => {
+                // 无终态：任务保持 RUNNING，下一轮 run_once 重新领取继续轮询。
+            }
             Err(e) => {
                 tasks.add_log(task.id, "ERROR", &e.to_string())?;
                 tasks.fail(task.id, &e.to_string())?;

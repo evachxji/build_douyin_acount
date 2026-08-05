@@ -68,8 +68,6 @@ export const api = {
   preparePublish: (assetId: number) =>
     call<PreparePublishResult>("prepare_publish", { assetId }),
   listDrafts: () => call<PublishDraft[]>("list_drafts"),
-  publishFileSelected: (draftId: number) =>
-    call<void>("publish_file_selected", { draftId }),
   publishConfirmed: (draftId: number) =>
     call<void>("publish_confirmed", { draftId }),
   copyText: (text: string) => call<void>("copy_to_clipboard", { text }),

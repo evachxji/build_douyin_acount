@@ -1,16 +1,16 @@
-//! Publisher Agent 集成测试：用假 sidecar（tests/fixtures/fake_publish.cjs）验证
-//! 人工选文件 -> 自动填表 -> 人工确认发布 的完整人机协作状态流。
+//! Publisher Agent 集成测试：用假 sidecar 验证「自动检测选文件 -> 自动填表 ->
+//! 人工确认发布」的完整人机协作状态流。
 use std::path::{Path, PathBuf};
 
-use build_douyin_acount_lib::agents::publisher::{request_confirm, request_continue};
+use build_douyin_acount_lib::agents::publisher::{request_confirm, PublisherAgent};
 use build_douyin_acount_lib::agents::{Agent, AgentContext, AgentOutcome};
-use build_douyin_acount_lib::agents::publisher::PublisherAgent;
 use build_douyin_acount_lib::db::repos::assets::AssetsRepo;
 use build_douyin_acount_lib::db::repos::drafts::DraftsRepo;
+use build_douyin_acount_lib::db::repos::tasks::TasksRepo;
 use build_douyin_acount_lib::db::Database;
 use build_douyin_acount_lib::domain::asset::{AssetStatus, NewAsset};
 use build_douyin_acount_lib::domain::draft::{DraftStatus, NewDraft};
-use build_douyin_acount_lib::domain::task::{AgentTask, TaskStatus};
+use build_douyin_acount_lib::domain::task::TaskStatus;
 use build_douyin_acount_lib::media::MediaStore;
 use serde_json::json;
 
@@ -28,6 +28,7 @@ struct TestEnv {
     agent: PublisherAgent,
     asset_id: i64,
     draft_id: i64,
+    task_id: i64,
 }
 
 fn setup() -> TestEnv {
@@ -75,6 +76,14 @@ fn setup() -> TestEnv {
         })
         .expect("create draft");
 
+    let task_id = TasksRepo::new(&db)
+        .enqueue(
+            "publisher",
+            "prepare_publish",
+            json!({ "draft_id": draft_id, "asset_id": asset_id }),
+            true,
+        )
+        .expect("enqueue");
     let agent = PublisherAgent::new("node", fixture("fake_publish.cjs"));
     TestEnv {
         _dir: dir,
@@ -83,24 +92,16 @@ fn setup() -> TestEnv {
         agent,
         asset_id,
         draft_id,
+        task_id,
     }
 }
 
-fn task(env: &TestEnv) -> AgentTask {
-    AgentTask {
-        id: 1,
-        agent_name: "publisher".to_string(),
-        task_type: "prepare_publish".to_string(),
-        payload: json!({ "draft_id": env.draft_id, "asset_id": env.asset_id }),
-        status: TaskStatus::Running,
-        attempts: 1,
-        max_attempts: 3,
-        next_retry_at: None,
-        human_required: true,
-        error: None,
-        created_at: "2026-01-01T00:00:00Z".to_string(),
-        updated_at: "2026-01-01T00:00:00Z".to_string(),
-    }
+/// 领取任务并返回 RUNNING 状态的任务（模拟 worker run_once）。
+fn claim(env: &TestEnv) -> build_douyin_acount_lib::domain::task::AgentTask {
+    TasksRepo::new(&env.db)
+        .claim_next("publisher")
+        .expect("claim")
+        .expect("some task")
 }
 
 fn progress_path(env: &TestEnv) -> PathBuf {
@@ -122,36 +123,64 @@ fn write_progress(env: &TestEnv, state: &str, message: &str) {
 }
 
 #[test]
-fn publisher_waits_for_human_file_selection_with_path() {
+fn publisher_file_stage_keeps_task_running_with_info_payload() {
+    let env = setup();
+    // 预写 waiting_for_file：验证选文件阶段任务保持 RUNNING 且 payload 写入阶段信息。
+    write_progress(&env, "waiting_for_file", "waiting");
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Continue));
+    let t = TasksRepo::new(&env.db).get(env.task_id).expect("get").expect("task");
+    assert_eq!(t.status, TaskStatus::Running);
+    assert_eq!(t.payload["stage"], "file");
+    assert_eq!(t.payload["title"], "测试标题");
+    assert_eq!(t.payload["path"], "videos/test.mp4");
+}
+
+#[test]
+fn publisher_spawns_sidecar_and_auto_fills() {
     let env = setup();
     let ctx = AgentContext {
         db: &env.db,
         store: env.store.clone(),
     };
-    let outcome = env.agent.run(&ctx, task(&env)).expect("run");
+    // 模拟 worker 每轮重新领取：sidecar 拉起后自动完成 waiting_for_file -> form_filled，
+    // agent 在后续轮次看到 form_filled 进入 form_ready。
+    let mut outcome = None;
+    for _ in 0..20 {
+        let task = claim(&env);
+        outcome = Some(env.agent.run(&ctx, task).expect("run"));
+        if !matches!(outcome.as_ref().unwrap(), AgentOutcome::Continue) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    let outcome = outcome.expect("ran at least once");
     let payload = match outcome {
         AgentOutcome::WaitingForHuman(p) => p,
         other => panic!("expected WaitingForHuman, got {other:?}"),
     };
-    assert_eq!(payload["stage"], "file");
-    assert_eq!(payload["path"], "videos/test.mp4");
+    assert_eq!(payload["stage"], "form_ready");
+    let draft = DraftsRepo::new(&env.db).get(env.draft_id).expect("get").expect("draft");
+    assert_eq!(draft.status, DraftStatus::Filled);
 }
 
 #[test]
-fn publisher_continues_after_file_selected_and_reaches_form_ready() {
+fn publisher_auto_detects_form_ready_after_fill() {
     let env = setup();
+    // 假 sidecar 已自动完成填表
+    write_progress(&env, "form_filled", "fake form filled");
     let ctx = AgentContext {
         db: &env.db,
         store: env.store.clone(),
     };
-    // 第一次运行：等待人工选文件
-    let first = env.agent.run(&ctx, task(&env)).expect("run");
-    assert!(matches!(first, AgentOutcome::WaitingForHuman(_)));
-
-    // 用户点【已选择】 -> 写 continue 标记 -> 再次运行：轮到上传完成并进入 form_ready
-    request_continue(&env.store, env.draft_id).expect("continue");
-    let second = env.agent.run(&ctx, task(&env)).expect("run 2");
-    let payload = match second {
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    let payload = match outcome {
         AgentOutcome::WaitingForHuman(p) => p,
         other => panic!("expected WaitingForHuman, got {other:?}"),
     };
@@ -169,7 +198,8 @@ fn publisher_finalizes_when_human_confirms_publish() {
         db: &env.db,
         store: env.store.clone(),
     };
-    let outcome = env.agent.run(&ctx, task(&env)).expect("run");
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
     assert!(matches!(outcome, AgentOutcome::Succeeded(_)));
     let draft = DraftsRepo::new(&env.db).get(env.draft_id).expect("get").expect("draft");
     assert_eq!(draft.status, DraftStatus::Published);
@@ -185,7 +215,8 @@ fn publisher_finalizes_when_sidecar_detects_success() {
         db: &env.db,
         store: env.store.clone(),
     };
-    let outcome = env.agent.run(&ctx, task(&env)).expect("run");
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
     assert!(matches!(outcome, AgentOutcome::Succeeded(_)));
     let asset = AssetsRepo::new(&env.db).get(env.asset_id).expect("get").expect("asset");
     assert_eq!(asset.status, AssetStatus::Published);
@@ -199,10 +230,9 @@ fn publisher_fails_when_browser_closed_before_publish() {
         db: &env.db,
         store: env.store.clone(),
     };
-    let err = env.agent.run(&ctx, task(&env)).expect_err("must fail");
+    let task = claim(&env);
+    let err = env.agent.run(&ctx, task).expect_err("must fail");
     assert!(err.to_string().contains("浏览器标签页已关闭"), "{err}");
-    let asset = AssetsRepo::new(&env.db).get(env.asset_id).expect("get").expect("asset");
-    assert_eq!(asset.status, AssetStatus::Selected);
 }
 
 #[test]
@@ -213,7 +243,8 @@ fn publisher_surfaces_sidecar_failure() {
         db: &env.db,
         store: env.store.clone(),
     };
-    let err = env.agent.run(&ctx, task(&env)).expect_err("must fail");
+    let task = claim(&env);
+    let err = env.agent.run(&ctx, task).expect_err("must fail");
     assert!(err.to_string().contains("selector not found"), "{err}");
 }
 

@@ -17,6 +17,8 @@ pub enum AgentOutcome {
     Succeeded(serde_json::Value),
     /// 需要人工审批。
     WaitingForHuman(serde_json::Value),
+    /// 本轮无终态：任务保持 RUNNING，worker 下一轮继续轮询（用于等待外部变化）。
+    Continue,
 }
 
 /// Agent 执行上下文：提供数据库与媒体存储访问。

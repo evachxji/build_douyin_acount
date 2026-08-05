@@ -152,6 +152,33 @@ impl<'a> TasksRepo<'a> {
         self.transition(id, TaskStatus::WaitingForHuman)
     }
 
+    /// 向任务 payload 合并字段（保留执行字段 draft_id/asset_id），供前端读取阶段信息。
+    pub fn update_payload(&self, id: i64, patch: serde_json::Value) -> Result<(), DomainError> {
+        let conn = self.db.conn();
+        let current: Option<String> = conn
+            .query_row(
+                "SELECT payload_json FROM agent_tasks WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut payload: serde_json::Value = current
+            .map(|s| serde_json::from_str(&s))
+            .transpose()?
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let (serde_json::Value::Object(map), serde_json::Value::Object(p)) =
+            (&mut payload, &patch)
+        {
+            map.extend(p.clone());
+        }
+        let payload = serde_json::to_string(&payload)?;
+        conn.execute(
+            "UPDATE agent_tasks SET payload_json = ?1, updated_at = ?2 WHERE id = ?3",
+            params![payload, now(), id],
+        )?;
+        Ok(())
+    }
+
     /// 等待人工确认，并把 Agent 返回的上下文（stage/message/path 等）合并进任务
     /// payload 持久化，供前端审批弹窗读取（不覆盖 draft_id/asset_id 等执行字段）。
     pub fn wait_for_human_with_context(

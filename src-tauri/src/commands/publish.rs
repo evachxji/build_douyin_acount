@@ -86,13 +86,6 @@ pub fn list_drafts(state: State<AppState>) -> Result<Vec<crate::domain::draft::P
     DraftsRepo::new(&state.db).list().map_err(ApiError::from)
 }
 
-/// 用户在文件选择弹窗中选好视频：写入 continue 标记并放行 publisher 任务继续填表。
-#[tauri::command]
-pub fn publish_file_selected(state: State<AppState>, draft_id: i64) -> Result<(), ApiError> {
-    crate::agents::publisher::request_continue(&state.store, draft_id).map_err(ApiError::from)?;
-    resume_publisher_task(&state, draft_id)
-}
-
 /// 用户确认已在浏览器中本人点击发布：写入 confirm 标记并放行任务收尾。
 #[tauri::command]
 pub fn publish_confirmed(state: State<AppState>, draft_id: i64) -> Result<(), ApiError> {

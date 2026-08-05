@@ -1,12 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-
 use serde_json::json;
 
 use crate::agents::{Agent, AgentContext, AgentOutcome};
 use crate::db::repos::assets::AssetsRepo;
 use crate::db::repos::drafts::DraftsRepo;
+use crate::db::repos::tasks::TasksRepo;
 use crate::domain::asset::AssetStatus;
 use crate::domain::draft::DraftStatus;
 use crate::domain::error::DomainError;
@@ -73,10 +72,6 @@ fn read_progress(path: &Path) -> Result<SidecarState, DomainError> {
     })
 }
 
-/// 单次轮询窗口：覆盖视频上传/转码耗时（可能数分钟）。
-const POLL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
-
 fn publish_dir(store: &crate::media::MediaStore) -> PathBuf {
     store.root().join("publish")
 }
@@ -95,10 +90,6 @@ fn cancel_path(store: &crate::media::MediaStore, draft_id: i64) -> PathBuf {
     marker_path(store, "cancel", draft_id)
 }
 
-fn continue_path(store: &crate::media::MediaStore, draft_id: i64) -> PathBuf {
-    marker_path(store, "continue", draft_id)
-}
-
 fn confirm_path(store: &crate::media::MediaStore, draft_id: i64) -> PathBuf {
     marker_path(store, "confirm", draft_id)
 }
@@ -115,11 +106,6 @@ fn write_marker(store: &crate::media::MediaStore, dir: &str, draft_id: i64) -> R
 /// 请求取消：写 cancel 标记，sidecar 关闭标签页。
 pub fn request_cancel(store: &crate::media::MediaStore, draft_id: i64) -> Result<(), DomainError> {
     write_marker(store, "cancel", draft_id)
-}
-
-/// 用户已在文件选择弹窗中选好视频：写 continue 标记，sidecar 继续自动填表。
-pub fn request_continue(store: &crate::media::MediaStore, draft_id: i64) -> Result<(), DomainError> {
-    write_marker(store, "continue", draft_id)
 }
 
 /// 用户确认已在浏览器中本人点击发布：写 confirm 标记，Agent 据此收尾。
@@ -146,7 +132,6 @@ fn spawn_sidecar(
         "hashtags": draft.hashtags,
         "progressFile": progress_path(&ctx.store, draft_id),
         "cancelFile": cancel_path(&ctx.store, draft_id),
-        "continueFile": continue_path(&ctx.store, draft_id),
         "confirmFile": confirm_path(&ctx.store, draft_id),
     });
     std::fs::write(&job_path, serde_json::to_string_pretty(&job)?)?;
@@ -219,84 +204,67 @@ impl Agent for PublisherAgent {
             state = SidecarState::BrowserStarted;
         }
 
-        let deadline = Instant::now() + POLL_TIMEOUT;
-        loop {
-            match state {
-                SidecarState::Published => {
+        // 中间状态立即返回 Continue：任务保持 RUNNING，由 worker 每 2 秒重新领取轮询，
+        // 避免长时间阻塞 worker（选文件/上传/转码可能耗时数分钟）。
+        match state {
+            SidecarState::Published => {
+                finalize_published(ctx, draft_id, asset_id)?;
+                Ok(AgentOutcome::Succeeded(json!({
+                    "draft_id": draft_id,
+                    "asset_id": asset_id,
+                    "published": true,
+                })))
+            }
+            SidecarState::Failed(msg) => Err(DomainError::InvalidData(format!(
+                "发布 sidecar 失败：{msg}"
+            ))),
+            SidecarState::BrowserClosed => Err(DomainError::InvalidData(
+                "浏览器标签页已关闭，未完成发布。如需重试请重新「准备发布」。".to_string(),
+            )),
+            SidecarState::Cancelled => Err(DomainError::InvalidData("发布任务已取消。".to_string())),
+            SidecarState::WaitingForFile => {
+                // 选文件阶段不设人工放行节点：把阶段信息写入任务 payload 供前端展示，
+                // 任务保持 RUNNING，由 sidecar 自动检测页面变化并填表。
+                TasksRepo::new(ctx.db).update_payload(
+                    task.id,
+                    json!({
+                        "stage": "file",
+                        "title": draft.title,
+                        "path": asset.file_path,
+                    }),
+                )?;
+                Ok(AgentOutcome::Continue)
+            }
+            SidecarState::FormFilled => {
+                // 幂等：仅 DRAFT -> FILLED。
+                let current = DraftsRepo::new(ctx.db).get(draft_id)?.ok_or_else(|| {
+                    DomainError::InvalidData(format!("draft {draft_id} not found"))
+                })?;
+                if current.status == DraftStatus::Draft {
+                    DraftsRepo::new(ctx.db).update_status(draft_id, DraftStatus::Filled)?;
+                }
+                // 用户已点【我已发布】：人工确认发布完成。
+                if confirm_path(&ctx.store, draft_id).exists() {
                     finalize_published(ctx, draft_id, asset_id)?;
-                    return Ok(AgentOutcome::Succeeded(json!({
+                    Ok(AgentOutcome::Succeeded(json!({
                         "draft_id": draft_id,
                         "asset_id": asset_id,
                         "published": true,
-                    })));
-                }
-                SidecarState::Failed(msg) => {
-                    return Err(DomainError::InvalidData(format!("发布 sidecar 失败：{msg}")));
-                }
-                SidecarState::BrowserClosed => {
-                    return Err(DomainError::InvalidData(
-                        "浏览器标签页已关闭，未完成发布。如需重试请重新「准备发布」。".to_string(),
-                    ));
-                }
-                SidecarState::Cancelled => {
-                    return Err(DomainError::InvalidData("发布任务已取消。".to_string()));
-                }
-                SidecarState::WaitingForFile => {
-                    // 用户已点【已选择】（continue 标记存在）：继续轮询上传/填表进度。
-                    if continue_path(&ctx.store, draft_id).exists() {
-                        std::thread::sleep(POLL_INTERVAL);
-                        state = read_progress(&progress_file)?;
-                        continue;
-                    }
-                    // 首次进入：请用户在弹窗中选择文件；选好后点【已选择】。
-                    return Ok(waiting_json(
-                        "file",
-                        draft_id,
-                        asset_id,
-                        Some(&asset.file_path),
-                        "请在打开的抖音页面点击「上传视频」，在文件选择弹窗中选择下方路径的视频，选择完成后点击【已选择】。",
-                    ));
-                }
-                SidecarState::FormFilled => {
-                    // 幂等：仅 DRAFT -> FILLED。
-                    let current = DraftsRepo::new(ctx.db).get(draft_id)?.ok_or_else(|| {
-                        DomainError::InvalidData(format!("draft {draft_id} not found"))
-                    })?;
-                    if current.status == DraftStatus::Draft {
-                        DraftsRepo::new(ctx.db).update_status(draft_id, DraftStatus::Filled)?;
-                    }
-                    // 用户已点【我已发布】：人工确认发布完成。
-                    if confirm_path(&ctx.store, draft_id).exists() {
-                        finalize_published(ctx, draft_id, asset_id)?;
-                        return Ok(AgentOutcome::Succeeded(json!({
-                            "draft_id": draft_id,
-                            "asset_id": asset_id,
-                            "published": true,
-                            "confirmed_by_human": true,
-                        })));
-                    }
-                    return Ok(waiting_json(
+                        "confirmed_by_human": true,
+                    })))
+                } else {
+                    Ok(waiting_json(
                         "form_ready",
                         draft_id,
                         asset_id,
                         None,
                         "标题/文案/话题已填写完成，标签页保持打开。请核对内容后，由你本人点击页面上的【发布】按钮；发布完成后点击【我已发布】。",
-                    ));
+                    ))
                 }
-                // browser_started / uploading：继续等待
-                _ => {
-                    if Instant::now() >= deadline {
-                        return Ok(waiting_json(
-                            "filling",
-                            draft_id,
-                            asset_id,
-                            None,
-                            "正在等待视频上传/表单填写完成。就绪后会自动进入下一步，请留意任务面板。",
-                        ));
-                    }
-                    std::thread::sleep(POLL_INTERVAL);
-                    state = read_progress(&progress_file)?;
-                }
+            }
+            // browser_started / uploading：继续等待下一轮轮询
+            SidecarState::BrowserStarted | SidecarState::Uploading | SidecarState::Missing => {
+                Ok(AgentOutcome::Continue)
             }
         }
     }

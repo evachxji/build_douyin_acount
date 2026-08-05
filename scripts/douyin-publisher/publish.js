@@ -30,6 +30,9 @@ const OPENCLI_ENTRIES = [
   "C:/Users/<user>/AppData/Roaming/npm/node_modules/@jackwener/opencli/dist/src/main.js",
 ];
 
+class CancelRequested extends Error {}
+class TabClosed extends Error {}
+
 function writeProgress(state, message) {
   const payload = {
     state,
@@ -150,10 +153,12 @@ async function sessionAlive() {
   }
 }
 
-/** 等待某个 CSS 选择器可见（opencli find 探测）。 */
+/** 等待某个 CSS 选择器可见（opencli find 探测）；等待期间响应取消/标签关闭。 */
 async function waitSelector(selector, timeoutMs, intervalMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (markerExists(job.cancelFile)) throw new CancelRequested();
+    if (!(await sessionAlive())) throw new TabClosed("浏览器标签页已关闭");
     try {
       const res = await runOpencli(["browser", session, "find", "--css", selector]);
       const entries = res?.entries ?? [];
@@ -166,17 +171,6 @@ async function waitSelector(selector, timeoutMs, intervalMs = 3000) {
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   return null;
-}
-
-async function waitCancelOrContinue(timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (markerExists(job.cancelFile)) return "cancel";
-    if (markerExists(job.continueFile)) return "continue";
-    if (!(await sessionAlive())) return "closed";
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  return "timeout";
 }
 
 async function fillComposer() {
@@ -254,36 +248,25 @@ async function monitorAfterFill() {
 async function main() {
   writeProgress("browser_started", "正在打开抖音上传页（独立标签页）");
   // 先写出 waiting_for_file：程序端立即弹出人工确认窗口并自动复制路径，
-  // 与标签页打开并行，无需等页面/上传弹窗。
-  writeProgress(
-    "waiting_for_file",
-    `请在打开的抖音页面点击「上传视频」，在文件选择弹窗中选择：${job.videoPath}`,
-  );
+  // 与标签页打开并行。选择视频后 douyin 页面进入作曲器，下面自动检测并填表。
+  writeProgress("waiting_for_file", "请在打开的抖音页面点击「上传视频」并选择视频文件，选择后程序将自动填写标题/文案/话题");
   await openUploadPage();
-  // 文件选择弹窗由用户本人操作；此处仅给出路径并等待【已选择】。
-
-  const wait = await waitCancelOrContinue(60 * 60 * 1000);
-  if (wait === "cancel") {
-    writeProgress("cancelled", "用户取消");
-    await closeSession();
-    process.exit(2);
-  }
-  if (wait === "closed") {
-    writeProgress("browser_closed", "浏览器标签页已关闭，未完成上传");
-    process.exit(2);
-  }
-  if (wait === "timeout") {
-    writeProgress("failed", "等待【已选择】超时（1 小时）");
-    await closeSession();
-    process.exit(1);
-  }
-
+  // 自动检测：等待作曲器（标题输入框）出现即视为已选择并上传完成。
   await fillComposer();
   const result = await monitorAfterFill();
   process.exit(result === "published" ? 0 : 2);
 }
 
 main().catch(async (err) => {
+  if (err instanceof CancelRequested || markerExists(job.cancelFile)) {
+    writeProgress("cancelled", "用户取消，关闭浏览器标签页");
+    await closeSession();
+    process.exit(2);
+  }
+  if (err instanceof TabClosed) {
+    writeProgress("browser_closed", "浏览器标签页已关闭，未完成上传");
+    process.exit(2);
+  }
   writeProgress("failed", err.message || String(err));
   console.error("[publisher] failed:", err);
   await closeSession().catch(() => {});

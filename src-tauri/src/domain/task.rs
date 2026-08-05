@@ -20,7 +20,7 @@ impl TaskStatus {
         use TaskStatus::*;
         match (self, to) {
             (Pending, Running) => true,
-            (Running, Succeeded | Failed | WaitingForHuman) => true,
+            (Running, Succeeded | Failed | WaitingForHuman | Cancelled) => true,
             (WaitingForHuman, Running | Cancelled) => true,
             (Failed, Pending) => true, // 重试
             _ => false,
