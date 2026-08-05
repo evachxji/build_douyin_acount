@@ -100,7 +100,7 @@ pub struct TaskLog {
 /// 指数退避：30s * 2^(failure_count)，上限 1 小时。
 pub fn retry_delay_secs(failure_count: i64) -> i64 {
     let base = 30;
-    let exp = failure_count.max(0).min(7);
+    let exp = failure_count.clamp(0, 7);
     let secs = base * 2_i64.pow(exp as u32);
     secs.min(3600)
 }

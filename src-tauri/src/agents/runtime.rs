@@ -81,7 +81,7 @@ impl<'a> AgentRuntime<'a> {
     pub async fn run_loop(
         &self,
         agent_names: &[&'static str],
-        mut shutdown: watch::Receiver<bool>,
+        shutdown: watch::Receiver<bool>,
         interval: Duration,
     ) {
         loop {

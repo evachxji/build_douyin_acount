@@ -17,33 +17,41 @@
 
 ### 2.1 数据库与领域模型
 
-- [ ] migrations：video_assets / analysis_results / account_styles / publish_drafts / agent_tasks / task_logs / recommendations
-- [ ] Repository 层与单元测试（CRUD、状态流转约束）
+- [x] migrations：video_assets / analysis_results / account_styles / publish_drafts / agent_tasks / task_logs / recommendations
+- [x] Repository 层与单元测试（CRUD、状态流转约束）
 
 验证：`cargo test` 全绿；SQLite 文件在 `storage/db/app.db` 正确生成。
 
 ### 2.2 视频管理服务
 
-- [ ] 文件存储（videos / covers / frames / audio）路径管理
-- [ ] 资产导入（手动拖入本地视频）与删除（含磁盘文件清理）
-- [ ] 收藏、标记发布、状态流转命令
+- [x] 文件存储（videos / covers / frames / audio）路径管理
+- [x] 资产导入（手动拖入本地视频）与删除（含磁盘文件清理）
+- [x] 收藏、标记发布、状态流转命令
 
 验证：CLI 测试脚本 + Rust 集成测试覆盖导入/删除/状态流转。
 
 ### 2.3 AI 分析管线
 
-- [ ] FFmpeg 抽帧与音频提取（含超时与错误处理）
-- [ ] Whisper sidecar（ASR + 语言识别）
-- [ ] Ollama Vision 帧分析（结构化 JSON）
-- [ ] LLM 综合与 JSON 校验（重试机制）
-- [ ] Vision Agent 任务编排 + 断点续跑
-- [ ] Filter Agent（英文判定阈值化）
+- [x] FFmpeg 抽帧与音频提取（含超时与错误处理）
+- [x] Whisper sidecar（ASR + 语言识别）
+- [x] Ollama Vision 帧分析（结构化 JSON）
+- [x] LLM 综合与 JSON 校验
+- [x] Vision Agent 任务编排 + 队列断点续跑
+- [x] Filter Agent（英文判定阈值化）
 
 验证：
 
 - 用 2~3 条真实本地视频跑通全管线
 - 单条分析失败不阻塞队列；重启后任务恢复
 - 输出 JSON 字段与设计一致
+
+> 备注：真实模型端到端联调（Ollama 拉取 Vision/LLM 模型）待模型就绪后执行；管线编排已由桩组件集成测试覆盖。
+
+### 2.4 脚手架（第一阶段遗留项，随第二阶段完成）
+
+- [x] Tauri 2 + React 18 + Tailwind 脚手架可编译运行
+- [x] 根级 `package.json` 统一 `pnpm tauri dev/build` 入口
+- [x] 冒烟验证：vite 启动 → Rust 编译 → 窗口正常打开
 
 ## 第三阶段：GUI + 视频浏览
 

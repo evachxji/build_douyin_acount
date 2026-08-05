@@ -18,6 +18,7 @@ pub enum AssetStatus {
 
 impl AssetStatus {
     /// 是否允许 from -> to 的合法状态迁移。
+    #[allow(clippy::match_like_matches_macro)] // 成对状态矩阵用 match 更可读
     pub fn can_transition_to(&self, to: &AssetStatus) -> bool {
         use AssetStatus::*;
         match (self, to) {
