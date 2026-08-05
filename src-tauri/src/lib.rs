@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod agents;
 pub mod db;
 pub mod domain;
 pub mod media;
