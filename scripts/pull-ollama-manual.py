@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.request
 
 REGISTRY = "https://registry.ollama.ai"
@@ -77,6 +78,13 @@ def download_blob(url: str, dest: str, expected_sha: str, expected_size: int, re
             continue
         # 先按大小判断：不完整就续传，避免把大文件删掉重下。
         size = os.path.getsize(dest) if os.path.exists(dest) else 0
+        if size > expected_size:
+            # 续传错位导致文件偏大（常见于断连后 Range 被 CDN 忽略而追加数据）：
+            # 截断到期望大小，保留前面的有效数据。
+            print(f"    fix: truncating {size} -> {expected_size}", flush=True)
+            with open(dest, "r+b") as f:
+                f.truncate(expected_size)
+            size = expected_size
         if size < expected_size:
             print(f"    retry: size {size} < expected {expected_size}", flush=True)
             continue
@@ -86,7 +94,15 @@ def download_blob(url: str, dest: str, expected_sha: str, expected_size: int, re
             print(f"  complete: {os.path.basename(dest)}", flush=True)
             return
         print(f"    retry: sha mismatch at full size {size}", flush=True)
-        os.remove(dest)
+        for _ in range(3):
+            try:
+                os.remove(dest)
+                break
+            except PermissionError as exc:
+                print(f"    delete blocked ({exc}); retry in 3s", flush=True)
+                time.sleep(3)
+        else:
+            raise RuntimeError(f"cannot remove corrupt blob {dest}")
     raise RuntimeError(f"failed to download {dest} after {retries} attempts")
 
 

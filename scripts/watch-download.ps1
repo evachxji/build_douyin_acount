@@ -23,7 +23,7 @@ while ($restarts -lt $MaxRestarts) {
         Where-Object { $_.StartTime -gt (Get-Date).AddMinutes(-90) }
     if (-not $proc) {
         "restart (dead) $(Get-Date -Format 'HH:mm:ss')" | Out-File $logFile -Append
-        Start-Process -FilePath "python" -ArgumentList $scriptPath -WorkingDirectory $workDir `
+        Start-Process -FilePath "python" -ArgumentList "-u",$scriptPath -WorkingDirectory $workDir `
             -RedirectStandardOutput $pullLog -RedirectStandardError "$pullLog.err" -WindowStyle Hidden
         $restarts++
         $stall = 0
@@ -37,7 +37,7 @@ while ($restarts -lt $MaxRestarts) {
             Out-File $logFile -Append
         Get-Process -Name python -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
-        Start-Process -FilePath "python" -ArgumentList $scriptPath -WorkingDirectory $workDir `
+        Start-Process -FilePath "python" -ArgumentList "-u",$scriptPath -WorkingDirectory $workDir `
             -RedirectStandardOutput $pullLog -RedirectStandardError "$pullLog.err" -WindowStyle Hidden
         $restarts++
         $stall = 0
