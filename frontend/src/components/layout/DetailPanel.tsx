@@ -6,13 +6,13 @@ import { formatCount, formatDuration, platformLabel } from "../../lib/format";
 import { ScoreBadge } from "../ScoreBadge";
 import { StatusBadge } from "../StatusBadge";
 import { useEffect, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api/client";
 import type { AnalysisResult, ContentCopy } from "../../api/types";
 
 export function DetailPanel() {
   const focusId = useSelectionStore((s) => s.focusId);
   const assets = useAssetsStore((s) => s.assets);
-  const toggleFavorite = useAssetsStore((s) => s.toggleFavorite);
   const removeAsset = useAssetsStore((s) => s.removeAsset);
   const updateStatus = useAssetsStore((s) => s.updateStatus);
   const analyzeSelected = useAssetsStore((s) => s.analyzeSelected);
@@ -98,8 +98,15 @@ export function DetailPanel() {
   };
 
   const handleDelete = async () => {
-    if (confirm(`确定删除视频 #${asset.id}？本地文件与封面将一并删除。`)) {
+    const ok = await ask(`确定删除视频 #${asset.id}？本地文件与封面将一并删除。`, {
+      title: "删除确认",
+      kind: "warning",
+    });
+    if (!ok) return;
+    try {
       await removeAsset(asset.id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -260,16 +267,6 @@ export function DetailPanel() {
       </div>
 
       <div className="mt-auto flex flex-wrap gap-2 border-t border-line p-4">
-        <button
-          onClick={() => void toggleFavorite(asset.id)}
-          className={`h-9 rounded border px-3 text-sm transition-colors ${
-            asset.is_favorite
-              ? "border-accent bg-accent/15 text-accent"
-              : "border-line text-mute hover:border-accent/40 hover:text-paper"
-          }`}
-        >
-          {asset.is_favorite ? "取消收藏" : "收藏"}
-        </button>
         <button
           onClick={() => void handleAnalyze()}
           disabled={busy}

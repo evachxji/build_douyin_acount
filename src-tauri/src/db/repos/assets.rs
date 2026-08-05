@@ -10,7 +10,6 @@ use crate::domain::error::DomainError;
 pub struct AssetFilter {
     pub status: Option<AssetStatus>,
     pub platform: Option<String>,
-    pub favorite: Option<bool>,
     pub category: Option<String>,
     pub search: Option<String>,
     pub limit: i64,
@@ -24,14 +23,13 @@ pub struct AssetsRepo<'a> {
 
 const ASSET_COLS: &str = "va.id, va.dedup_key, va.file_path, va.cover_path, va.source_platform,
     va.source_url, va.author, va.title, va.description, va.published_at, va.tags_json,
-    va.likes, va.comments, va.plays, va.duration_ms, va.status, va.is_favorite,
+    va.likes, va.comments, va.plays, va.duration_ms, va.status,
     ar.category AS category, ar.quality_score AS quality_score,
     va.created_at, va.updated_at";
 
 fn row_to_asset(row: &Row<'_>) -> rusqlite::Result<VideoAsset> {
     let tags: String = row.get(10)?;
     let status: String = row.get(15)?;
-    let favorite: i64 = row.get(16)?;
     Ok(VideoAsset {
         id: row.get(0)?,
         dedup_key: row.get(1)?,
@@ -51,11 +49,10 @@ fn row_to_asset(row: &Row<'_>) -> rusqlite::Result<VideoAsset> {
         status: status
             .parse()
             .map_err(|e| rusqlite::Error::FromSqlConversionFailure(15, rusqlite::types::Type::Text, Box::new(e)))?,
-        is_favorite: favorite != 0,
-        category: row.get(17)?,
-        quality_score: row.get(18)?,
-        created_at: row.get(19)?,
-        updated_at: row.get(20)?,
+        category: row.get(16)?,
+        quality_score: row.get(17)?,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
     })
 }
 
@@ -139,10 +136,6 @@ impl<'a> AssetsRepo<'a> {
             conditions.push("va.source_platform = ?".to_string());
             values.push(Box::new(p));
         }
-        if let Some(f) = filter.favorite {
-            conditions.push("va.is_favorite = ?".to_string());
-            values.push(Box::new(f as i64));
-        }
         if let Some(c) = filter.category {
             conditions.push("ar.category = ?".to_string());
             values.push(Box::new(c));
@@ -192,17 +185,6 @@ impl<'a> AssetsRepo<'a> {
             "UPDATE video_assets SET status = ?1, updated_at = ?2 WHERE id = ?3",
             params![to.to_string(), now(), id],
         )?;
-        Ok(())
-    }
-
-    pub fn set_favorite(&self, id: i64, favorite: bool) -> Result<(), DomainError> {
-        let n = self.db.conn().execute(
-            "UPDATE video_assets SET is_favorite = ?1, updated_at = ?2 WHERE id = ?3",
-            params![favorite as i64, now(), id],
-        )?;
-        if n == 0 {
-            return Err(DomainError::AssetNotFound(id));
-        }
         Ok(())
     }
 

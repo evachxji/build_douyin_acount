@@ -16,7 +16,6 @@ pub struct AssetListFilterArg {
     pub category: Option<String>,
     pub status: Option<String>,
     pub platform: Option<String>,
-    pub favorite: Option<bool>,
     pub search: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
@@ -36,7 +35,6 @@ pub fn list_assets(
     let filter = AssetFilter {
         status,
         platform: filter.platform,
-        favorite: filter.favorite,
         category: filter.category,
         search: filter.search,
         limit: filter.limit.unwrap_or(300),
@@ -59,17 +57,6 @@ pub fn get_analysis(
 ) -> Result<Option<AnalysisResult>, ApiError> {
     AnalysesRepo::new(&state.db)
         .get_by_asset(asset_id)
-        .map_err(ApiError::from)
-}
-
-#[tauri::command]
-pub fn set_favorite(
-    state: State<AppState>,
-    id: i64,
-    favorite: bool,
-) -> Result<(), ApiError> {
-    VideoManager::new(&state.db, state.store.clone())
-        .set_favorite(id, favorite)
         .map_err(ApiError::from)
 }
 

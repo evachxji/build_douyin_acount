@@ -92,18 +92,6 @@ export function TopBar({
         <option value="local">本地</option>
       </select>
 
-      <button
-        onClick={() => void setFilter({ favorite: filter.favorite ? undefined : true })}
-        className={`h-9 rounded border px-3 text-sm transition-colors ${
-          filter.favorite
-            ? "border-accent bg-accent/15 text-accent"
-            : "border-line text-mute hover:border-accent/40 hover:text-paper"
-        }`}
-        title="只看收藏"
-      >
-        ♥ 收藏
-      </button>
-
       <div className="flex-1" />
 
       <button

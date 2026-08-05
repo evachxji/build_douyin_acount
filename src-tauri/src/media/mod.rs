@@ -89,10 +89,6 @@ impl<'a> VideoManager<'a> {
         AssetsRepo::new(self.db).get(id)
     }
 
-    pub fn set_favorite(&self, id: i64, favorite: bool) -> Result<(), DomainError> {
-        AssetsRepo::new(self.db).set_favorite(id, favorite)
-    }
-
     pub fn update_status(&self, id: i64, to: AssetStatus) -> Result<(), DomainError> {
         AssetsRepo::new(self.db).update_status(id, to)
     }

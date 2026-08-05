@@ -33,7 +33,6 @@ export function buildAssetFilter(filter: FilterState): AssetListFilterArg {
   if (filter.category) out.category = filter.category;
   if (filter.status) out.status = filter.status;
   if (filter.platform) out.platform = filter.platform;
-  if (filter.favorite) out.favorite = true;
   if (filter.search?.trim()) out.search = filter.search.trim();
   return out;
 }

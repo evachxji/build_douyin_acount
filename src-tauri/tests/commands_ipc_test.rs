@@ -66,7 +66,6 @@ fn build_app(db: Database, store: MediaStore) -> tauri::App<tauri::test::MockRun
         .invoke_handler(tauri::generate_handler![
             commands::assets::list_assets,
             commands::assets::library_overview,
-            commands::assets::set_favorite,
             commands::assets::update_asset_status,
             commands::analysis::analyze_assets,
             commands::settings::get_settings,
@@ -107,17 +106,6 @@ fn commands_work_over_ipc_with_frontend_arg_names() {
     // get_settings：默认模型配置
     let settings = invoke(&webview, "get_settings", json!({})).expect("settings ok");
     assert_eq!(settings["vision_model"], json!("qwen2.5vl:7b"));
-
-    // set_favorite 后按收藏过滤
-    invoke(&webview, "set_favorite", json!({ "id": a, "favorite": true })).expect("fav ok");
-    let favs = invoke(
-        &webview,
-        "list_assets",
-        json!({ "filter": { "favorite": true } }),
-    )
-    .expect("fav list ok");
-    assert_eq!(favs.as_array().map(Vec::len), Some(1));
-    assert_eq!(favs[0]["id"], json!(a));
 
     // 非法状态迁移 -> 明确错误码
     let err = invoke(

@@ -49,8 +49,6 @@ export const api = {
   getAsset: (id: number) => call<VideoAsset | null>("get_asset", { id }),
   getAnalysis: (assetId: number) =>
     call<AnalysisResult | null>("get_analysis", { assetId }),
-  setFavorite: (id: number, favorite: boolean) =>
-    call<void>("set_favorite", { id, favorite }),
   deleteAsset: (id: number) => call<void>("delete_asset", { id }),
   updateAssetStatus: (id: number, to: string) =>
     call<void>("update_asset_status", { id, to }),

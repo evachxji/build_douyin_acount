@@ -120,9 +120,6 @@ fn video_manager_favorite_and_status_flow() {
     };
     let asset = mgr.import_file(&src, default_import()).expect("import");
 
-    mgr.set_favorite(asset.id, true).expect("fav");
-    assert!(mgr.get_asset(asset.id).expect("get").expect("some").is_favorite);
-
     // NEW -> ANALYZING -> READY -> SELECTED -> PUBLISHED 全链路合法
     mgr.update_status(asset.id, AssetStatus::Analyzing).expect("analyzing");
     mgr.update_status(asset.id, AssetStatus::Candidate).expect("CANDIDATE");

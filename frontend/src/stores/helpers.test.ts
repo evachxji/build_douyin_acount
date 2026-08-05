@@ -21,13 +21,11 @@ describe("buildAssetFilter", () => {
       category: "宠物",
       status: undefined,
       platform: "instagram",
-      favorite: true,
       search: "cat",
     });
     expect(filter).toEqual({
       category: "宠物",
       platform: "instagram",
-      favorite: true,
       search: "cat",
       limit: 300,
       offset: 0,

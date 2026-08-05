@@ -67,7 +67,6 @@ pub fn run() {
             commands::assets::list_assets,
             commands::assets::get_asset,
             commands::assets::get_analysis,
-            commands::assets::set_favorite,
             commands::assets::delete_asset,
             commands::assets::update_asset_status,
             commands::assets::import_videos,

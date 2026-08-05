@@ -26,7 +26,6 @@ struct Sample {
     comments: i64,
     plays: i64,
     status: &'static str, // "CANDIDATE" | "new" | "ELIMINATED"
-    favorite: bool,
     category: Option<&'static str>,
     tags: &'static [&'static str],
     score: Option<i64>,
@@ -45,7 +44,6 @@ const SAMPLES: &[Sample] = &[
         comments: 2_340,
         plays: 860_000,
         status: "CANDIDATE",
-        favorite: true,
         category: Some("宠物"),
         tags: &["猫", "萌宠", "治愈", "日常"],
         score: Some(92),
@@ -62,7 +60,6 @@ const SAMPLES: &[Sample] = &[
         comments: 1_120,
         plays: 420_000,
         status: "CANDIDATE",
-        favorite: false,
         category: Some("宠物"),
         tags: &["狗", "萌宠", "搞笑"],
         score: Some(85),
@@ -79,7 +76,6 @@ const SAMPLES: &[Sample] = &[
         comments: 3_890,
         plays: 1_200_000,
         status: "CANDIDATE",
-        favorite: true,
         category: Some("美食"),
         tags: &["做饭", "早餐", "治愈"],
         score: Some(88),
@@ -96,7 +92,6 @@ const SAMPLES: &[Sample] = &[
         comments: 860,
         plays: 310_000,
         status: "CANDIDATE",
-        favorite: false,
         category: Some("美食"),
         tags: &["探店", "烧腊", "城市"],
         score: Some(78),
@@ -113,7 +108,6 @@ const SAMPLES: &[Sample] = &[
         comments: 2_010,
         plays: 640_000,
         status: "CANDIDATE",
-        favorite: false,
         category: Some("手工"),
         tags: &["DIY", "木工", "制作过程"],
         score: Some(83),
@@ -130,7 +124,6 @@ const SAMPLES: &[Sample] = &[
         comments: 4_500,
         plays: 1_800_000,
         status: "CANDIDATE",
-        favorite: true,
         category: Some("风景"),
         tags: &["自然", "森林", "治愈"],
         score: Some(90),
@@ -147,7 +140,6 @@ const SAMPLES: &[Sample] = &[
         comments: 1_050,
         plays: 380_000,
         status: "CANDIDATE",
-        favorite: false,
         category: Some("风景"),
         tags: &["城市", "夜景", "旅行"],
         score: Some(74),
@@ -164,7 +156,6 @@ const SAMPLES: &[Sample] = &[
         comments: 620,
         plays: 190_000,
         status: "CANDIDATE",
-        favorite: false,
         category: Some("生活"),
         tags: &["日常", "咖啡", "治愈"],
         score: Some(80),
@@ -181,7 +172,6 @@ const SAMPLES: &[Sample] = &[
         comments: 940,
         plays: 280_000,
         status: "new",
-        favorite: false,
         category: None,
         tags: &[],
         score: None,
@@ -198,7 +188,6 @@ const SAMPLES: &[Sample] = &[
         comments: 8_200,
         plays: 2_400_000,
         status: "ELIMINATED",
-        favorite: false,
         category: None,
         tags: &["英文口播"],
         score: Some(30),
@@ -260,14 +249,13 @@ fn main() {
         db.conn()
             .execute(
                 "UPDATE video_assets
-                 SET tags_json = ?1, likes = ?2, comments = ?3, plays = ?4, is_favorite = ?5
-                 WHERE id = ?6",
+                 SET tags_json = ?1, likes = ?2, comments = ?3, plays = ?4
+                 WHERE id = ?5",
                 params![
                     serde_json::to_string(&s.tags).expect("tags json"),
                     s.likes,
                     s.comments,
                     s.plays,
-                    s.favorite as i64,
                     asset.id
                 ],
             )

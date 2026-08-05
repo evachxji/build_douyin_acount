@@ -102,18 +102,6 @@ fn asset_status_transition_validated_on_update() {
     repo.update_status(id, AssetStatus::Candidate).expect("ok");
 }
 
-#[test]
-fn asset_favorite_toggle_and_filter() {
-    let db = test_db();
-    let repo = AssetsRepo::new(&db);
-    let id = repo.insert(sample_asset("fav")).expect("insert");
-    repo.set_favorite(id, true).expect("fav on");
-    let favs = repo.list(AssetFilter { favorite: Some(true), ..Default::default() }).expect("list");
-    assert_eq!(favs.len(), 1);
-    repo.set_favorite(id, false).expect("fav off");
-    let favs = repo.list(AssetFilter { favorite: Some(true), ..Default::default() }).expect("list");
-    assert!(favs.is_empty());
-}
 
 #[test]
 fn asset_list_filters_by_status_and_category() {

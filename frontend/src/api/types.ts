@@ -32,7 +32,6 @@ export interface VideoAsset {
   plays: number;
   duration_ms: number;
   status: AssetStatus;
-  is_favorite: boolean;
   category: string | null;
   quality_score: number | null;
   created_at: string;
@@ -171,7 +170,6 @@ export interface AssetListFilterArg {
   category?: string;
   status?: string;
   platform?: string;
-  favorite?: boolean;
   search?: string;
   limit?: number;
   offset?: number;

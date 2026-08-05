@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { VideoCard } from "../VideoCard";
@@ -16,7 +17,6 @@ export function Waterfall() {
   const error = useAssetsStore((s) => s.error);
   const reload = useAssetsStore((s) => s.load);
   const removeMany = useAssetsStore((s) => s.removeMany);
-  const favoriteMany = useAssetsStore((s) => s.favoriteMany);
   const ids = useSelectionStore((s) => s.ids);
   const focusId = useSelectionStore((s) => s.focusId);
   const focus = useSelectionStore((s) => s.focus);
@@ -86,13 +86,17 @@ export function Waterfall() {
   const handleBatchDelete = async () => {
     const list = [...ids].filter((id) => assets.some((a) => a.id === id));
     if (list.length === 0) return;
-    if (!confirm(`确定删除选中的 ${list.length} 个视频？本地文件与封面将一并删除。`)) return;
-    await removeMany(list);
-    clear();
-  };
-
-  const handleFavoriteAll = async (favorite: boolean) => {
-    await favoriteMany([...ids], favorite);
+    const ok = await ask(`确定删除选中的 ${list.length} 个视频？本地文件与封面将一并删除。`, {
+      title: "删除确认",
+      kind: "warning",
+    });
+    if (!ok) return;
+    try {
+      await removeMany(list);
+      clear();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const marqueeStyle =
@@ -179,18 +183,6 @@ export function Waterfall() {
               className="h-8 rounded border border-line px-3 text-sm text-mute transition-colors hover:border-accent/50 hover:text-paper"
             >
               取消全选
-            </button>
-            <button
-              onClick={() => void handleFavoriteAll(true)}
-              className="h-8 rounded border border-accent/50 px-3 text-sm text-accent transition-colors hover:bg-accent/10"
-            >
-              收藏
-            </button>
-            <button
-              onClick={() => void handleFavoriteAll(false)}
-              className="h-8 rounded border border-line px-3 text-sm text-mute transition-colors hover:border-accent/50 hover:text-paper"
-            >
-              取消收藏
             </button>
             <button
               onClick={() => void handleBatchDelete()}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../api/client";
 import type { VideoAsset } from "../api/types";
 import { coverUrl } from "../api/urls";
@@ -90,7 +91,6 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
         </div>
         <div className="absolute right-2 top-2 flex items-center gap-1.5">
           <ScoreBadge score={asset.quality_score} />
-          {asset.is_favorite && <span className="text-accent text-sm leading-none">♥</span>}
         </div>
         <span className="absolute bottom-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-paper/95 backdrop-blur">
           {formatDuration(asset.duration_ms)}
@@ -143,24 +143,26 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
         选
       </button>
 
-      {menu && (
-        <div
-          ref={menuRef}
-          onContextMenu={(e) => e.preventDefault()}
-          className="fixed z-50 w-36 rounded-lg border border-line bg-panel p-1 shadow-2xl shadow-black/50"
-          style={{
-            left: Math.min(menu.x, window.innerWidth - 150),
-            top: Math.min(menu.y, window.innerHeight - 72),
-          }}
-        >
-          <button
-            onClick={() => void handleOpenPath()}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-paper/90 transition-colors hover:bg-accent/15 hover:text-accent"
+      {menu &&
+        createPortal(
+          <div
+            ref={menuRef}
+            onContextMenu={(e) => e.preventDefault()}
+            className="fixed z-50 w-36 rounded-lg border border-line bg-panel p-1 shadow-2xl shadow-black/50"
+            style={{
+              left: Math.min(menu.x, window.innerWidth - 150),
+              top: Math.min(menu.y, window.innerHeight - 72),
+            }}
           >
-            📁 打开路径
-          </button>
-        </div>
-      )}
+            <button
+              onClick={() => void handleOpenPath()}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-paper/90 transition-colors hover:bg-accent/15 hover:text-accent"
+            >
+              📁 打开路径
+            </button>
+          </div>,
+          document.body,
+        )}
     </article>
   );
 }
