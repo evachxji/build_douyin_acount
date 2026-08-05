@@ -35,7 +35,19 @@ pub fn get_task(
 /// 人工确认：驳回任务（WAITING_FOR_HUMAN -> CANCELLED）。
 #[tauri::command]
 pub fn cancel_task(state: State<AppState>, id: i64) -> Result<(), ApiError> {
-    TasksRepo::new(&state.db).cancel(id).map_err(ApiError::from)
+    let repo = TasksRepo::new(&state.db);
+    let task = repo.get(id).map_err(ApiError::from)?;
+    repo.cancel(id).map_err(ApiError::from)?;
+    // publisher 任务取消时同步通知 sidecar 关闭浏览器窗口。
+    if let Some(t) = task {
+        if t.agent_name == "publisher" {
+            if let Some(draft_id) = t.payload["draft_id"].as_i64() {
+                crate::agents::publisher::request_cancel(&state.store, draft_id)
+                    .map_err(ApiError::from)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 人工确认：放行任务继续执行（WAITING_FOR_HUMAN -> RUNNING）。

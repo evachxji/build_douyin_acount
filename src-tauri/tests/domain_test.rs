@@ -74,3 +74,30 @@ fn asset_status_serde_roundtrip_matches_database_strings() {
         assert_eq!(status.to_string(), *expected, "Display must match DB string");
     }
 }
+
+#[test]
+fn draft_status_lifecycle_and_serde() {
+    use build_douyin_acount_lib::domain::draft::DraftStatus;
+
+    // DRAFT -> FILLED -> PUBLISHED；任意阶段可取消
+    assert!(DraftStatus::Draft.can_transition_to(&DraftStatus::Filled));
+    assert!(DraftStatus::Draft.can_transition_to(&DraftStatus::Cancelled));
+    assert!(DraftStatus::Filled.can_transition_to(&DraftStatus::Published));
+    assert!(DraftStatus::Filled.can_transition_to(&DraftStatus::Cancelled));
+    assert!(!DraftStatus::Draft.can_transition_to(&DraftStatus::Draft));
+    assert!(!DraftStatus::Published.can_transition_to(&DraftStatus::Filled));
+
+    // serde 输出与 DB 字符串一致
+    for (status, expected) in [
+        (DraftStatus::Draft, "DRAFT"),
+        (DraftStatus::Filled, "FILLED"),
+        (DraftStatus::Published, "PUBLISHED"),
+        (DraftStatus::Cancelled, "CANCELLED"),
+    ] {
+        let json = serde_json::to_string(&status).expect("serialize");
+        assert_eq!(json, format!("\"{expected}\""));
+        let back: DraftStatus = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, status);
+        assert_eq!(status.to_string(), expected);
+    }
+}

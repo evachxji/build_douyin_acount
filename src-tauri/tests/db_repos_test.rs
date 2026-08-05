@@ -228,9 +228,120 @@ fn task_claim_respects_single_worker_per_agent() {
     repo.enqueue("vision", "a", serde_json::json!({}), false).expect("1");
     repo.enqueue("vision", "b", serde_json::json!({}), false).expect("2");
     let first = repo.claim_next("vision").expect("claim").expect("first");
-    assert!(repo.claim_next("vision").expect("claim").is_none(), "running task blocks queue");
+    // RUNNING 期间重新领取返回同一任务（恢复语义），不会跳到 PENDING 的 b。
+    let again = repo.claim_next("vision").expect("claim").expect("reclaim");
+    assert_eq!(again.id, first.id, "running task is re-claimed, not the queued b");
+    assert_eq!(again.attempts, first.attempts, "re-claim must not increment attempts");
     repo.succeed(first.id).expect("succeed");
-    assert!(repo.claim_next("vision").expect("claim").is_some(), "next task claimable after finish");
+    let next = repo.claim_next("vision").expect("claim").expect("next task");
+    assert_eq!(next.id, 2, "after finish, queued task b is claimable");
+}
+
+#[test]
+fn task_resume_after_waiting_for_human_is_reclaimed() {
+    let db = test_db();
+    let repo = TasksRepo::new(&db);
+    let id = repo.enqueue("publisher", "prepare_publish", serde_json::json!({}), true).expect("enqueue");
+    repo.claim_next("publisher").expect("claim").expect("some");
+    repo.wait_for_human(id).expect("wait");
+    // WAITING_FOR_HUMAN 阻塞队列
+    assert!(repo.claim_next("publisher").expect("claim").is_none());
+    // 人工放行 -> RUNNING -> worker 重新领取同一任务继续执行
+    repo.resume(id).expect("resume");
+    let again = repo.claim_next("publisher").expect("claim").expect("reclaim");
+    assert_eq!(again.id, id);
+    assert_eq!(again.attempts, 1, "resume must not count as a retry");
+}
+
+#[test]
+fn task_left_running_by_crash_is_recovered() {
+    let db = test_db();
+    let repo = TasksRepo::new(&db);
+    let id = repo.enqueue("publisher", "prepare_publish", serde_json::json!({}), false).expect("enqueue");
+    repo.claim_next("publisher").expect("claim").expect("some");
+    // 模拟进程在 RUNNING 中途退出：不做任何收尾，直接重启后重新领取
+    let recovered = repo.claim_next("publisher").expect("claim").expect("recovered");
+    assert_eq!(recovered.id, id);
+    assert_eq!(recovered.status, TaskStatus::Running);
+    assert_eq!(recovered.attempts, 1);
+}
+
+#[test]
+fn task_wait_for_human_persists_context_in_payload() {
+    let db = test_db();
+    let repo = TasksRepo::new(&db);
+    let id = repo
+        .enqueue(
+            "publisher",
+            "prepare_publish",
+            serde_json::json!({ "draft_id": 4, "asset_id": 2 }),
+            true,
+        )
+        .expect("enqueue");
+    repo.claim_next("publisher").expect("claim").expect("some");
+    repo.wait_for_human_with_context(
+        id,
+        serde_json::json!({ "stage": "file", "path": "videos/x.mp4", "message": "hi" }),
+    )
+    .expect("wait with context");
+    let t = repo.get(id).expect("get").expect("some");
+    assert_eq!(t.status, TaskStatus::WaitingForHuman);
+    // 执行字段保留，上下文字段可读
+    assert_eq!(t.payload["draft_id"], 4);
+    assert_eq!(t.payload["asset_id"], 2);
+    assert_eq!(t.payload["stage"], "file");
+    assert_eq!(t.payload["path"], "videos/x.mp4");
+    assert_eq!(t.payload["message"], "hi");
+}
+
+#[test]
+fn draft_repo_create_list_and_status_flow() {
+    use build_douyin_acount_lib::db::repos::drafts::DraftsRepo;
+    use build_douyin_acount_lib::domain::draft::{DraftStatus, NewDraft};
+
+    let db = test_db();
+    let repo = DraftsRepo::new(&db);
+    // publish_drafts.asset_id 外键指向 video_assets，先建一个素材。
+    let asset_id = AssetsRepo::new(&db)
+        .insert(NewAsset {
+            dedup_key: Some("draft-test".to_string()),
+            file_path: "videos/draft.mp4".to_string(),
+            cover_path: None,
+            source_platform: "instagram".to_string(),
+            source_url: None,
+            author: None,
+            title: None,
+            description: None,
+            published_at: None,
+            tags: Vec::new(),
+            likes: 0,
+            comments: 0,
+            plays: 0,
+            duration_ms: 1000,
+        })
+        .expect("insert asset");
+    let id = repo
+        .create(NewDraft {
+            asset_id,
+            style_id: None,
+            title: Some("标题".to_string()),
+            body: Some("正文".to_string()),
+            hashtags: vec!["萌宠".to_string(), "猫".to_string()],
+        })
+        .expect("create");
+    let draft = repo.get(id).expect("get").expect("some");
+    assert_eq!(draft.status, DraftStatus::Draft);
+    assert_eq!(draft.hashtags, vec!["萌宠", "猫"]);
+
+    assert_eq!(repo.list().expect("list").len(), 1);
+    repo.update_status(id, DraftStatus::Filled).expect("filled");
+    repo.update_status(id, DraftStatus::Published).expect("published");
+    let published = repo.get(id).expect("get").expect("some");
+    assert_eq!(published.status, DraftStatus::Published);
+
+    // 非法迁移：PUBLISHED 不能再回 FILLED
+    let err = repo.update_status(id, DraftStatus::Filled).expect_err("illegal");
+    assert!(err.to_string().contains("illegal status transition"));
 }
 
 #[test]

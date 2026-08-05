@@ -1,4 +1,5 @@
 pub mod filter;
+pub mod publisher;
 pub mod runtime;
 pub mod vision;
 

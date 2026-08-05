@@ -15,6 +15,10 @@ pub struct AppSettings {
     pub whisper_model: String,
     pub english_ratio_threshold: f64,
     pub quality_min_keep: i64,
+    /// 抖音发布 sidecar（Node 脚本路径）与浏览器通道。
+    pub node_bin: String,
+    pub publisher_script: String,
+    pub publisher_browser: String,
 }
 
 impl Default for AppSettings {
@@ -28,6 +32,9 @@ impl Default for AppSettings {
             whisper_model: "base".to_string(),
             english_ratio_threshold: 0.6,
             quality_min_keep: 60,
+            node_bin: "node".to_string(),
+            publisher_script: "scripts/douyin-publisher/publish.js".to_string(),
+            publisher_browser: "chrome".to_string(),
         }
     }
 }

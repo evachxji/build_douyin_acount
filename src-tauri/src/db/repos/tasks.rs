@@ -82,22 +82,36 @@ impl<'a> TasksRepo<'a> {
         Ok(rows)
     }
 
-    /// 领取下一个可执行任务（同一 Agent 串行：存在 RUNNING/WAITING_FOR_HUMAN 时返回 None）。
+    /// 领取下一个可执行任务（同一 Agent 串行：仅 WAITING_FOR_HUMAN 阻塞；
+    /// RUNNING 允许重新领取，用于人工 resume 与进程崩溃后的恢复）。
     pub fn claim_next(&self, agent_name: &str) -> Result<Option<AgentTask>, DomainError> {
         let conn = self.db.conn();
-        let busy: bool = conn.query_row(
+        let blocked: bool = conn.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM agent_tasks
-                WHERE agent_name = ?1 AND status IN ('RUNNING','WAITING_FOR_HUMAN'))",
+                WHERE agent_name = ?1 AND status = 'WAITING_FOR_HUMAN')",
             params![agent_name],
             |r| r.get(0),
         )?;
-        if busy {
+        if blocked {
             return Ok(None);
         }
         let now_ts = now();
-        let task = conn
+        // 1) 优先认领遗留的 RUNNING：人工 resume 后继续执行，或崩溃恢复。
+        let running = conn
             .query_row(
+                "SELECT * FROM agent_tasks
+                 WHERE agent_name = ?1 AND status = 'RUNNING'
+                 ORDER BY created_at ASC LIMIT 1",
+                params![agent_name],
+                row_to_task,
+            )
+            .optional()?;
+        // 2) 无 RUNNING 时领取 PENDING（重试退避到期的才可领）。
+        let task = if let Some(t) = running {
+            Some(t)
+        } else {
+            conn.query_row(
                 "SELECT * FROM agent_tasks
                  WHERE agent_name = ?1 AND status = 'PENDING'
                    AND (next_retry_at IS NULL OR next_retry_at <= ?2)
@@ -105,18 +119,25 @@ impl<'a> TasksRepo<'a> {
                 params![agent_name, now_ts],
                 row_to_task,
             )
-            .optional()?;
+            .optional()?
+        };
         let Some(task) = task else {
             return Ok(None);
         };
+        // 仅 PENDING -> RUNNING 视为新一次尝试；重新认领 RUNNING 不累加。
+        let attempts = if task.status == TaskStatus::Pending {
+            task.attempts + 1
+        } else {
+            task.attempts
+        };
         conn.execute(
-            "UPDATE agent_tasks SET status = 'RUNNING', attempts = attempts + 1,
-             error = NULL, updated_at = ?1 WHERE id = ?2",
-            params![now_ts, task.id],
+            "UPDATE agent_tasks SET status = 'RUNNING', attempts = ?1,
+             error = NULL, updated_at = ?2 WHERE id = ?3",
+            params![attempts, now_ts, task.id],
         )?;
         Ok(Some(AgentTask {
             status: TaskStatus::Running,
-            attempts: task.attempts + 1,
+            attempts,
             error: None,
             updated_at: now_ts,
             ..task
@@ -129,6 +150,39 @@ impl<'a> TasksRepo<'a> {
 
     pub fn wait_for_human(&self, id: i64) -> Result<(), DomainError> {
         self.transition(id, TaskStatus::WaitingForHuman)
+    }
+
+    /// 等待人工确认，并把 Agent 返回的上下文（stage/message/path 等）合并进任务
+    /// payload 持久化，供前端审批弹窗读取（不覆盖 draft_id/asset_id 等执行字段）。
+    pub fn wait_for_human_with_context(
+        &self,
+        id: i64,
+        context: serde_json::Value,
+    ) -> Result<(), DomainError> {
+        let conn = self.db.conn();
+        let current: Option<String> = conn
+            .query_row(
+                "SELECT payload_json FROM agent_tasks WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut payload: serde_json::Value = current
+            .map(|s| serde_json::from_str(&s))
+            .transpose()?
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let (serde_json::Value::Object(map), serde_json::Value::Object(ctx)) =
+            (&mut payload, &context)
+        {
+            map.extend(ctx.clone());
+        }
+        let payload = serde_json::to_string(&payload)?;
+        conn.execute(
+            "UPDATE agent_tasks SET status = 'WAITING_FOR_HUMAN', payload_json = ?1,
+             updated_at = ?2 WHERE id = ?3",
+            params![payload, now(), id],
+        )?;
+        Ok(())
     }
 
     pub fn resume(&self, id: i64) -> Result<(), DomainError> {

@@ -16,6 +16,8 @@ fn settings_defaults_when_nothing_stored() {
     assert_eq!(settings.whisper_model, "base");
     assert_eq!(settings.english_ratio_threshold, 0.6);
     assert_eq!(settings.quality_min_keep, 60);
+    assert_eq!(settings.node_bin, "node");
+    assert_eq!(settings.publisher_browser, "chrome");
 }
 
 #[test]
@@ -31,6 +33,9 @@ fn settings_roundtrip_persists_fields() {
         whisper_model: "small".to_string(),
         english_ratio_threshold: 0.7,
         quality_min_keep: 70,
+        node_bin: "node-dev".to_string(),
+        publisher_script: "scripts/dev-publish.js".to_string(),
+        publisher_browser: "chromium".to_string(),
     };
     repo.save(&custom).expect("save");
 

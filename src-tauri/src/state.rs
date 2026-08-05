@@ -32,11 +32,18 @@ impl AppState {
         }
     }
 
-    /// 相对路径按当前目录解析（开发期仓库根为 cwd）。
+    /// 相对路径按当前目录解析；cargo run 的 cwd 是 src-tauri 时回退到仓库根。
     fn resolve_path(&self, p: &str) -> PathBuf {
         let path = Path::new(p);
         if path.exists() {
             return path.to_path_buf();
+        }
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(parent) = manifest.parent() {
+            let candidate = parent.join(p);
+            if candidate.exists() {
+                return candidate;
+            }
         }
         std::env::current_dir()
             .unwrap_or_default()
@@ -68,7 +75,7 @@ impl AppState {
         ))
     }
 
-    /// 装配 Agent Runtime 并注册 vision agent（Filter 阈值取自设置）。
+    /// 装配 Agent Runtime 并注册 vision / publisher agent。
     pub fn build_runtime(&self) -> Result<AgentRuntime<'_>, DomainError> {
         let rules = {
             let s = self.settings.read().expect("settings lock poisoned");
@@ -77,8 +84,16 @@ impl AppState {
                 quality_min_keep: s.quality_min_keep,
             }
         };
+        let (node, script) = {
+            let s = self.settings.read().expect("settings lock poisoned");
+            (
+                s.node_bin.clone(),
+                self.resolve_path(&s.publisher_script),
+            )
+        };
         let mut runtime = AgentRuntime::new(&self.db, self.store.clone());
         runtime.register(Box::new(VisionAgent::new(self.build_pipeline()?, rules)));
+        runtime.register(Box::new(crate::agents::publisher::PublisherAgent::new(node, script)));
         Ok(runtime)
     }
 }

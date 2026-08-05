@@ -1,0 +1,36 @@
+{
+  "_comment": "creator.douyin.com 上传页选择器候选（页面改版时可在此调整，按顺序尝试第一个可见元素）",
+  "uploadUrl": "https://creator.douyin.com/creator-micro/content/upload",
+  "loginIndicators": [
+    "text=登录",
+    "input[placeholder*='手机号']",
+    "text=扫码登录"
+  ],
+  "fileInputs": [
+    "input[type='file']"
+  ],
+  "titleInputs": [
+    "input[placeholder*='填写作品标题']",
+    "input[placeholder*='标题']",
+    "textarea[placeholder*='标题']",
+    "textarea[placeholder*='作品标题']"
+  ],
+  "descriptionEditors": [
+    "[contenteditable='true']",
+    ".zone-container div[contenteditable='true']",
+    ".public-DraftEditor-content[contenteditable='true']"
+  ],
+  "uploadCompleteIndicators": [
+    ".semi-progressbar",
+    ".byte-progressbar",
+    "div[class*='progress']"
+  ],
+  "publishButtons": [
+    "button:has-text('发布')"
+  ],
+  "successIndicators": [
+    "text=发布成功",
+    "text=已发布"
+  ],
+  "publishListUrlPart": "/creator-micro/content"
+}

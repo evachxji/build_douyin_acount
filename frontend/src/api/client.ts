@@ -5,6 +5,8 @@ import type {
   AppSettings,
   AssetListFilterArg,
   LibraryOverview,
+  PreparePublishResult,
+  PublishDraft,
   TaskLog,
   VideoAsset,
 } from "./types";
@@ -63,4 +65,11 @@ export const api = {
   getSettings: () => call<AppSettings>("get_settings"),
   updateSettings: (settings: AppSettings) =>
     call<AppSettings>("update_settings", { settings }),
+  preparePublish: (assetId: number) =>
+    call<PreparePublishResult>("prepare_publish", { assetId }),
+  listDrafts: () => call<PublishDraft[]>("list_drafts"),
+  publishFileSelected: (draftId: number) =>
+    call<void>("publish_file_selected", { draftId }),
+  publishConfirmed: (draftId: number) =>
+    call<void>("publish_confirmed", { draftId }),
 };

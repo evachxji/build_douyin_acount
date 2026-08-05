@@ -19,6 +19,7 @@ export function DetailPanel() {
   const setTaskOpen = useTaskStore((s) => s.setOpen);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
   const asset = assets.find((a) => a.id === focusId) ?? null;
 
@@ -74,6 +75,22 @@ export function DetailPanel() {
       setTaskOpen(true);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handlePreparePublish = async () => {
+    setPublishing(true);
+    try {
+      const res = await api.preparePublish(asset.id);
+      setTaskOpen(true);
+      // 任务入队后稍等后台 worker 拉起 sidecar，再刷新任务面板。
+      setTimeout(() => void useTaskStore.getState().refresh(), 1200);
+      return res;
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+      return null;
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -182,6 +199,16 @@ export function DetailPanel() {
             className="h-9 rounded border border-accent bg-accent/10 px-3 text-sm text-accent hover:bg-accent/20"
           >
             {statusActionLabel}
+          </button>
+        )}
+        {asset.status === "SELECTED" && (
+          <button
+            onClick={() => void handlePreparePublish()}
+            disabled={publishing}
+            className="h-9 rounded border border-accent bg-accent px-3 text-sm font-medium text-ink hover:brightness-110 disabled:opacity-40"
+            title="打开独立浏览器窗口，自动上传视频并填写标题/文案/话题（最终发布由你本人点击）"
+          >
+            {publishing ? "准备中…" : "准备发布"}
           </button>
         )}
         <button

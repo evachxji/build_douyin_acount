@@ -106,6 +106,28 @@ export interface AppSettings {
   whisper_model: string;
   english_ratio_threshold: number;
   quality_min_keep: number;
+  node_bin: string;
+  publisher_script: string;
+  publisher_browser: string;
+}
+
+export type DraftStatus = "DRAFT" | "FILLED" | "PUBLISHED" | "CANCELLED";
+
+export interface PublishDraft {
+  id: number;
+  asset_id: number;
+  style_id: number | null;
+  title: string | null;
+  body: string | null;
+  hashtags: string[];
+  status: DraftStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PreparePublishResult {
+  draft: PublishDraft;
+  task_id: number;
 }
 
 export interface AssetListFilterArg {

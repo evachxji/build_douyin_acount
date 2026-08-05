@@ -270,7 +270,7 @@ erDiagram
 ```
 1. 用户在 GUI 点击【开始采集】
 2. Runtime 创建 collect_batch 任务（Collector Agent）
-3. Collector 按 30/70 比例刷两个平台的推荐流，采满 100 条
+3. Collector 按设置中的平台比例（默认 TT 30% / IG 70%）刷两个平台的推荐流，采满目标条数（默认 100 条；点赞超上限的视频跳过，上限默认 >100 万，均可配置）
 4. 每条资产入库（NEW）→ 自动入队 analyze_asset（Vision Agent）
 5. Vision Agent 逐条分析 → Filter 判定 → 资产进入 READY / SKIPPED / LOW_PRIORITY
 6. 全部完成后 Runtime 触发 generate_recommendations（每类 Top N，含理由）

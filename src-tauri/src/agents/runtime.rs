@@ -67,7 +67,7 @@ impl<'a> AgentRuntime<'a> {
             }
             Ok(AgentOutcome::WaitingForHuman(ctx_data)) => {
                 tasks.add_log(task.id, "WARN", &format!("task waiting for human: {ctx_data}"))?;
-                tasks.wait_for_human(task.id)?;
+                tasks.wait_for_human_with_context(task.id, ctx_data)?;
             }
             Err(e) => {
                 tasks.add_log(task.id, "ERROR", &e.to_string())?;

@@ -73,6 +73,10 @@ pub fn run() {
             commands::assets::import_videos,
             commands::assets::library_overview,
             commands::analysis::analyze_assets,
+            commands::publish::prepare_publish,
+            commands::publish::list_drafts,
+            commands::publish::publish_file_selected,
+            commands::publish::publish_confirmed,
             commands::tasks::list_tasks,
             commands::tasks::get_task,
             commands::tasks::cancel_task,
@@ -89,6 +93,17 @@ pub fn run() {
                 if let Ok(runtime) = state.build_runtime() {
                     if let Err(e) = runtime.run_once("vision") {
                         tracing::warn!("vision worker error: {e}");
+                    }
+                }
+            });
+            // 后台 worker：publisher 任务（独立线程，避免阻塞 vision 队列）。
+            let handle_pub = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let state = handle_pub.state::<AppState>();
+                if let Ok(runtime) = state.build_runtime() {
+                    if let Err(e) = runtime.run_once("publisher") {
+                        tracing::warn!("publisher worker error: {e}");
                     }
                 }
             });

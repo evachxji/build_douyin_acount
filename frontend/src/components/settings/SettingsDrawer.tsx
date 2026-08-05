@@ -11,6 +11,9 @@ const EMPTY: AppSettings = {
   whisper_model: "",
   english_ratio_threshold: 0.6,
   quality_min_keep: 60,
+  node_bin: "node",
+  publisher_script: "",
+  publisher_browser: "chrome",
 };
 
 export function SettingsDrawer({
