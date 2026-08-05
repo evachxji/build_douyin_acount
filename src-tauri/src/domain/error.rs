@@ -19,6 +19,8 @@ pub enum DomainError {
     Json(#[from] serde_json::Error),
     #[error("process `{cmd}` failed: {detail}")]
     Process { cmd: String, detail: String },
+    #[error("http request failed: status={status}, body={body}")]
+    Http { status: u16, body: String },
 }
 
 /// 可序列化的错误响应（供 Tauri 命令返回给前端）。

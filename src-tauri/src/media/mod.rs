@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use uuid::Uuid;
 
@@ -7,6 +6,7 @@ use crate::db::Database;
 use crate::db::repos::assets::AssetsRepo;
 use crate::domain::asset::{AssetStatus, NewAsset, VideoAsset};
 use crate::domain::error::DomainError;
+use crate::util::run_tool;
 
 /// 本地媒体文件存储布局。
 #[derive(Debug, Clone)]
@@ -173,8 +173,8 @@ fn remove_if_in_store(store: &MediaStore, path: &Path) {
     }
 }
 
-/// 用 ffprobe 探测视频时长（毫秒）。
-fn probe_duration_ms(path: &Path) -> Result<i64, DomainError> {
+/// 用 ffprobe 探测视频时长（毫秒）。供媒体服务与分析管线复用。
+pub(crate) fn probe_duration_ms(path: &Path) -> Result<i64, DomainError> {
     let out = run_tool(
         "ffprobe",
         &[
@@ -215,22 +215,4 @@ fn generate_cover(video: &Path, cover: &Path) -> Result<(), DomainError> {
         ],
     )?;
     Ok(())
-}
-
-/// 执行外部工具；支持通过环境变量覆盖路径（如 FFMPEG_PATH / FFPROBE_PATH）。
-fn run_tool(name: &str, args: &[&str]) -> Result<Vec<u8>, DomainError> {
-    let env_name = format!("{name}_PATH").to_uppercase();
-    let tool = std::env::var(&env_name).unwrap_or_else(|_| name.to_string());
-    let output = Command::new(&tool).args(args).output().map_err(|e| DomainError::Process {
-        cmd: tool.clone(),
-        detail: format!("spawn failed: {e}"),
-    })?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(DomainError::Process {
-            cmd: tool,
-            detail,
-        });
-    }
-    Ok(output.stdout)
 }
