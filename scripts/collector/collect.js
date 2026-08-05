@@ -40,12 +40,12 @@ function markerExists(file) {
   return fs.existsSync(file);
 }
 
-function runCmd(cmd, args) {
+function runCmd(cmd, args, timeoutMs = 300_000) {
   return new Promise((resolve, reject) => {
     execFile(
       cmd,
       args,
-      { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
+      { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout) => {
         if (err) {
           reject(new Error(`${cmd} ${args.slice(0, 4).join(" ")}: ${err.message}`));
@@ -111,19 +111,29 @@ function runOpencliRaw(args) {
 }
 
 async function ytdlpMetadata(url) {
-  const out = await runCmd(job.ytdlpPath, ["--skip-download", "--dump-json", url]);
+  const out = await runCmd(
+    job.ytdlpPath,
+    ["--skip-download", "--dump-json", url],
+    600_000,
+  );
   return JSON.parse(out);
 }
 
 async function ytdlpDownload(url, outBase) {
-  await runCmd(job.ytdlpPath, [
+  const args = [
     "--no-playlist",
     "-f",
     "mp4/best",
-    "-o",
-    `${outBase}.%(ext)s`,
-    url,
-  ]);
+    "--socket-timeout",
+    "30",
+    "--retries",
+    "4",
+  ];
+  if (job.cookiesFile && fs.existsSync(job.cookiesFile)) {
+    args.push("--cookies", job.cookiesFile);
+  }
+  args.push("-o", `${outBase}.%(ext)s`, url);
+  await runCmd(job.ytdlpPath, args, 900_000);
   const files = fs.readdirSync(job.outputDir).filter((f) => f.startsWith(path.basename(outBase)));
   if (files.length === 0) throw new Error(`下载后未找到文件: ${outBase}`);
   return path.join(job.outputDir, files[0]);

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::collections::HashSet;
 
 use serde_json::json;
 
@@ -69,6 +70,10 @@ fn videos_path(store: &MediaStore, task_id: i64) -> PathBuf {
     collect_dir(store, task_id).join("videos.jsonl")
 }
 
+fn imported_path(store: &MediaStore, task_id: i64) -> PathBuf {
+    collect_dir(store, task_id).join("imported.jsonl")
+}
+
 fn output_dir(store: &MediaStore, task_id: i64) -> PathBuf {
     collect_dir(store, task_id).join("output")
 }
@@ -104,6 +109,7 @@ fn spawn_sidecar(
         "progressFile": progress_path(&ctx.store, task.id),
         "videosFile": videos_path(&ctx.store, task.id),
         "cancelFile": cancel_path(&ctx.store, task.id),
+        "cookiesFile": ctx.store.root().join("cookies.txt"),
         "ytdlpPath": self_agent.ytdlp,
     });
     std::fs::write(&job_path, serde_json::to_string_pretty(&job)?)?;
@@ -120,44 +126,91 @@ fn spawn_sidecar(
         })
 }
 
-/// 导入 sidecar 下载的视频并回填互动数据；返回导入的素材 id。
-fn import_videos(ctx: &AgentContext, task_id: i64) -> Result<Vec<i64>, DomainError> {
+fn load_imported(path: &Path) -> Result<HashSet<String>, DomainError> {
+    let mut set = HashSet::new();
+    let raw = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(set),
+        Err(e) => return Err(e.into()),
+    };
+    for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+        set.insert(line.trim().to_string());
+    }
+    Ok(set)
+}
+
+fn append_line(path: &Path, line: &str) -> Result<(), DomainError> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(f, "{line}")?;
+    Ok(())
+}
+
+/// 增量导入 sidecar 已下载的视频（videos.jsonl 中尚未导入的行），
+/// 每下载完一条立即入库并自动入队 AI 分析；已导入过的行通过
+/// `imported.jsonl` 与库内 dedup_key 双重去重。
+fn import_new_videos(ctx: &AgentContext, task_id: i64) -> Result<Vec<i64>, DomainError> {
     let vp = videos_path(&ctx.store, task_id);
     let raw = match std::fs::read_to_string(&vp) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e.into()),
     };
+    let ip = imported_path(&ctx.store, task_id);
+    let mut imported = load_imported(&ip)?;
     let assets = AssetsRepo::new(ctx.db);
     let manager = crate::media::VideoManager::new(ctx.db, ctx.store.clone());
-    let mut imported = Vec::new();
+    let mut new_ids = Vec::new();
     for line in raw.lines().filter(|l| !l.trim().is_empty()) {
         let v: serde_json::Value = serde_json::from_str(line)?;
         let file = v["file"].as_str().unwrap_or_default();
         let platform = v["platform"].as_str().unwrap_or("local");
         let id = v["id"].as_str().unwrap_or_default();
-        if file.is_empty() || !Path::new(file).is_file() {
+        let dedup = format!("{platform}:{id}");
+        if imported.contains(&dedup) || file.is_empty() || !Path::new(file).is_file() {
             continue;
         }
-        let asset = manager.import_file(
+        // 库内已有同源视频（此前批次/轮次）→ 只标记，不重复导入。
+        if assets.find_by_dedup(&dedup)?.is_some() {
+            imported.insert(dedup.clone());
+            append_line(&ip, &dedup)?;
+            continue;
+        }
+        let asset = match manager.import_file(
             Path::new(file),
             ImportOptions {
                 source_platform: platform.to_string(),
                 title: v["title"].as_str().map(str::to_string),
                 source_url: v["url"].as_str().map(str::to_string),
                 author: v["author"].as_str().map(str::to_string),
-                dedup_key: Some(format!("{platform}:{id}")),
+                dedup_key: Some(dedup.clone()),
             },
-        )?;
+        ) {
+            Ok(a) => a,
+            Err(DomainError::Duplicate(_)) => {
+                imported.insert(dedup.clone());
+                append_line(&ip, &dedup)?;
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!("collector import skipped {file}: {e}");
+                continue;
+            }
+        };
         assets.update_stats(
             asset.id,
             v["likes"].as_i64().unwrap_or(0),
             v["comments"].as_i64().unwrap_or(0),
             v["plays"].as_i64().unwrap_or(0),
         )?;
-        imported.push(asset.id);
+        imported.insert(dedup.clone());
+        append_line(&ip, &dedup)?;
+        new_ids.push(asset.id);
     }
-    Ok(imported)
+    crate::commands::analysis::enqueue_analysis(ctx.db, &new_ids)
 }
 
 impl Agent for CollectorAgent {
@@ -173,24 +226,40 @@ impl Agent for CollectorAgent {
             return Ok(AgentOutcome::Continue);
         }
         match state {
-            CollectorState::Running => Ok(AgentOutcome::Continue),
+            CollectorState::Running => {
+                // 逐条导入：每下载完一条立即入库并自动入队分析。
+                if let Err(e) = import_new_videos(ctx, task.id) {
+                    let _ = crate::db::repos::tasks::TasksRepo::new(ctx.db)
+                        .add_log(task.id, "WARN", &format!("增量导入失败（下轮重试）：{e}"));
+                }
+                Ok(AgentOutcome::Continue)
+            }
             CollectorState::Done => {
-                let imported = import_videos(ctx, task.id)?;
-                // 自动入队 AI 分析
-                let enqueued = crate::commands::analysis::enqueue_analysis(ctx.db, &imported)?;
+                let enqueued = import_new_videos(ctx, task.id)?;
                 // 视频已复制进素材库，清理采集临时目录。
                 let dir = collect_dir(&ctx.store, task.id);
                 if dir.is_dir() {
                     let _ = std::fs::remove_dir_all(&dir);
                 }
                 Ok(AgentOutcome::Succeeded(json!({
-                    "imported": imported.len(),
+                    "imported": enqueued.len(),
                     "enqueued_analysis": enqueued.len(),
                 })))
             }
             CollectorState::Cancelled => Err(DomainError::InvalidData("采集已取消。".to_string())),
             CollectorState::Failed(msg) => {
-                Err(DomainError::InvalidData(format!("采集失败：{msg}")))
+                // 重试次数未耗尽时：清空临时目录并立即重新拉起 sidecar，
+                // 同时返回 Err 消耗一次尝试（runtime 会指数退避后重新认领）。
+                if task.attempts < task.max_attempts {
+                    let dir = collect_dir(&ctx.store, task.id);
+                    if dir.is_dir() {
+                        let _ = std::fs::remove_dir_all(&dir);
+                    }
+                    spawn_sidecar(ctx, &task, self)?;
+                    Err(DomainError::InvalidData(format!("采集失败，已自动重启采集：{msg}")))
+                } else {
+                    Err(DomainError::InvalidData(format!("采集失败：{msg}")))
+                }
             }
             CollectorState::Missing => unreachable!(),
         }
