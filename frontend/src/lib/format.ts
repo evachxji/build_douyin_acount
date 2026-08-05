@@ -50,3 +50,24 @@ export function platformLabel(platform: string): string {
   };
   return map[platform.toLowerCase()] ?? platform;
 }
+
+/** Agent 名称 -> 中文描述（任务队列/审批弹窗展示用）。 */
+export function agentLabel(agent: string): string {
+  const map: Record<string, string> = {
+    vision: "AI 分析",
+    publisher: "抖音发布",
+    collector: "素材采集",
+    content: "文案生成",
+  };
+  return map[agent] ?? agent;
+}
+
+/** 任务类型 -> 中文描述。 */
+export function taskTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    analyze: "视频分析",
+    prepare_publish: "准备发布",
+    collect_batch: "批量采集",
+  };
+  return map[type] ?? type;
+}

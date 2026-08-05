@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import type { AgentTask } from "../../api/types";
 import { useTaskStore } from "../../stores/taskStore";
+import { agentLabel, taskTypeLabel } from "../../lib/format";
 
 /** 复制路径到系统剪贴板（后端 arboard，可靠）。 */
 function CopyPath({ path }: { path: string }) {
@@ -98,7 +99,7 @@ export function ApprovalDialog() {
               <li key={t.id} className="rounded-lg border border-line bg-ink/60 p-3">
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-paper/85">
-                    #{t.id} · {isPub ? "抖音发布" : t.agent_name} · {t.task_type}
+                    #{t.id} · {agentLabel(t.agent_name)} · {taskTypeLabel(t.task_type)}
                   </span>
                 </div>
                 {isPub && typeof t.payload.message === "string" && (

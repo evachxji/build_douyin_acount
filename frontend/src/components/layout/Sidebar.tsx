@@ -37,7 +37,6 @@ export function Sidebar() {
       </button>
       {STATUS_ORDER.map((status) => {
         const count = overview?.statuses.find((s) => s.status === status)?.count ?? 0;
-        if (count === 0) return null;
         return (
           <button
             key={status}

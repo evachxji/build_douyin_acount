@@ -267,13 +267,15 @@ export function DetailPanel() {
       </div>
 
       <div className="mt-auto flex flex-wrap gap-2 border-t border-line p-4">
-        <button
-          onClick={() => void handleAnalyze()}
-          disabled={busy}
-          className="h-9 rounded border border-line px-3 text-sm text-paper hover:border-accent/50 hover:bg-accent/10 disabled:opacity-40"
-        >
-          {busy ? "排队中…" : "AI 分析"}
-        </button>
+        {asset.status !== "CANDIDATE" && (
+          <button
+            onClick={() => void handleAnalyze()}
+            disabled={busy}
+            className="h-9 rounded border border-line px-3 text-sm text-paper hover:border-accent/50 hover:bg-accent/10 disabled:opacity-40"
+          >
+            {busy ? "排队中…" : "AI 分析"}
+          </button>
+        )}
         {statusActionLabel && nextStatus && (
           <button
             onClick={() => void handleStatusAction()}
@@ -281,6 +283,15 @@ export function DetailPanel() {
             title={asset.status === "CANDIDATE" ? "标记为待发布并自动生成 AI 文案" : undefined}
           >
             {statusActionLabel}
+          </button>
+        )}
+        {asset.status === "CANDIDATE" && (
+          <button
+            onClick={() => void updateStatus(asset.id, "ELIMINATED")}
+            className="h-9 rounded border border-bad/40 px-3 text-sm text-bad hover:bg-bad/10"
+            title="标记为淘汰，不再参与发布"
+          >
+            淘汰
           </button>
         )}
         {asset.status === "SELECTED" && (

@@ -31,12 +31,10 @@ export function SettingsDrawer({
   onClose: () => void;
 }) {
   const [settings, setSettings] = useState<AppSettings>(EMPTY);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
-      setSaved(false);
       setError(null);
       void api.getSettings().then(setSettings).catch((e) => setError(String(e)));
     }
@@ -50,7 +48,7 @@ export function SettingsDrawer({
   const save = async () => {
     try {
       await api.updateSettings(settings);
-      setSaved(true);
+      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -177,8 +175,6 @@ export function SettingsDrawer({
         </div>
 
         {error && <p className="mt-3 text-xs text-bad">{error}</p>}
-        {saved && <p className="mt-3 text-xs text-ok">已保存 ✓</p>}
-
         <div className="mt-auto flex gap-2">
           <button
             onClick={onClose}
