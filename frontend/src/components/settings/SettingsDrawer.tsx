@@ -14,6 +14,12 @@ const EMPTY: AppSettings = {
   node_bin: "node",
   publisher_script: "",
   publisher_browser: "chrome",
+  collector_script: "",
+  ytdlp_path: "yt-dlp",
+  batch_size: 20,
+  tiktok_ratio: 0.3,
+  instagram_ratio: 0.7,
+  max_likes: 1_000_000,
 };
 
 export function SettingsDrawer({
@@ -100,8 +106,58 @@ export function SettingsDrawer({
               />
             </label>
           </div>
+          <div className="border-t border-line pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-mute">
+              采集设置
+            </p>
+          </div>
+          <label className="block">
+            <span className="text-xs text-mute">每轮采集条数</span>
+            <input
+              type="number"
+              className={field}
+              value={settings.batch_size}
+              onChange={(e) => set({ batch_size: Number(e.target.value) })}
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs text-mute">TikTok 比例（0-1）</span>
+              <input
+                type="number"
+                step="0.05"
+                className={field}
+                value={settings.tiktok_ratio}
+                onChange={(e) => set({ tiktok_ratio: Number(e.target.value) })}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-mute">Instagram 比例（0-1）</span>
+              <input
+                type="number"
+                step="0.05"
+                className={field}
+                value={settings.instagram_ratio}
+                onChange={(e) => set({ instagram_ratio: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+          <label className="block">
+            <span className="text-xs text-mute">点赞上限（超过不采集）</span>
+            <input
+              type="number"
+              step="10000"
+              className={field}
+              value={settings.max_likes}
+              onChange={(e) => set({ max_likes: Number(e.target.value) })}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-mute">yt-dlp 路径</span>
+            <input className={field} value={settings.ytdlp_path} onChange={(e) => set({ ytdlp_path: e.target.value })} />
+          </label>
           <p className="text-[11px] leading-relaxed text-mute">
-            修改模型或阈值后，下一次 AI 分析立即生效；已保存到本地数据库。
+            采集配额与 yt-dlp 路径保存后，下一次采集立即生效。
           </p>
         </div>
 

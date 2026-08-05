@@ -71,4 +71,6 @@ export const api = {
   publishConfirmed: (draftId: number) =>
     call<void>("publish_confirmed", { draftId }),
   copyText: (text: string) => call<void>("copy_to_clipboard", { text }),
+  startCollection: () =>
+    call<{ platform: string; count: number; task_id: number }[]>("start_collection"),
 };

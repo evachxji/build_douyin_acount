@@ -73,6 +73,7 @@ pub fn run() {
             commands::assets::import_videos,
             commands::assets::library_overview,
             commands::analysis::analyze_assets,
+            commands::collection::start_collection,
             commands::publish::prepare_publish,
             commands::publish::list_drafts,
             commands::publish::publish_confirmed,
@@ -96,7 +97,7 @@ pub fn run() {
                     }
                 }
             });
-            // 后台 worker：publisher 任务（独立线程，避免阻塞 vision 队列）。
+            // 后台 worker：publisher / collector 任务（独立线程，避免阻塞 vision 队列）。
             let handle_pub = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -104,6 +105,9 @@ pub fn run() {
                 if let Ok(runtime) = state.build_runtime() {
                     if let Err(e) = runtime.run_once("publisher") {
                         tracing::warn!("publisher worker error: {e}");
+                    }
+                    if let Err(e) = runtime.run_once("collector") {
+                        tracing::warn!("collector worker error: {e}");
                     }
                 }
             });

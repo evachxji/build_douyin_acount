@@ -1,13 +1,13 @@
 import { statusMeta } from "../lib/format";
 
 const TONE_CLASS: Record<string, string> = {
-  neutral: "bg-white/5 text-mute border-white/10",
-  running: "bg-amber-500/10 text-warn border-warn/30 animate-pulse",
-  ready: "bg-emerald-500/10 text-ok border-ok/30",
-  selected: "bg-amber-500/15 text-accent border-accent/40",
-  published: "bg-violet-500/10 text-violet-300 border-violet-400/30",
-  warn: "bg-orange-500/10 text-warn border-warn/30",
-  danger: "bg-red-500/10 text-bad border-bad/40",
+  neutral: "bg-black/80 text-mute border-white/25",
+  running: "bg-black/80 text-warn border-warn/50 animate-pulse",
+  ready: "bg-black/80 text-ok border-ok/50",
+  selected: "bg-black/80 text-accent border-accent/60",
+  published: "bg-black/80 text-violet-300 border-violet-400/60",
+  warn: "bg-black/80 text-warn border-warn/50",
+  danger: "bg-black/80 text-bad border-bad/60",
 };
 
 export function StatusBadge({ status }: { status: string }) {

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::agents::filter::FilterRules;
+use crate::agents::collector::CollectorAgent;
 use crate::agents::runtime::AgentRuntime;
 use crate::agents::vision::VisionAgent;
 use crate::analysis::asr::WhisperAsr;
@@ -84,16 +85,22 @@ impl AppState {
                 quality_min_keep: s.quality_min_keep,
             }
         };
-        let (node, script) = {
+        let (node_bin, script, collector_script, ytdlp) = {
             let s = self.settings.read().expect("settings lock poisoned");
             (
                 s.node_bin.clone(),
                 self.resolve_path(&s.publisher_script),
+                self.resolve_path(&s.collector_script),
+                s.ytdlp_path.clone(),
             )
         };
         let mut runtime = AgentRuntime::new(&self.db, self.store.clone());
         runtime.register(Box::new(VisionAgent::new(self.build_pipeline()?, rules)));
-        runtime.register(Box::new(crate::agents::publisher::PublisherAgent::new(node, script)));
+        runtime.register(Box::new(crate::agents::publisher::PublisherAgent::new(
+            node_bin.clone(),
+            script,
+        )));
+        runtime.register(Box::new(CollectorAgent::new(node_bin, collector_script, ytdlp)));
         Ok(runtime)
     }
 }

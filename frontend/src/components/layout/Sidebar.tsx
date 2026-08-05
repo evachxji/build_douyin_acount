@@ -52,6 +52,17 @@ export function Sidebar() {
       <div className="mb-1 mt-5 px-2 text-[11px] font-semibold uppercase tracking-wider text-mute">
         状态
       </div>
+      <button
+        onClick={() => void setFilter({ status: undefined })}
+        className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
+          filter.status === undefined
+            ? "bg-accent/15 text-accent"
+            : "text-paper/80 hover:bg-white/5"
+        }`}
+      >
+        <span>全部</span>
+        <span className="tabular-nums text-mute">{overview?.total ?? 0}</span>
+      </button>
       {STATUS_ORDER.map((status) => {
         const count = overview?.statuses.find((s) => s.status === status)?.count ?? 0;
         if (count === 0) return null;

@@ -109,6 +109,12 @@ export interface AppSettings {
   node_bin: string;
   publisher_script: string;
   publisher_browser: string;
+  collector_script: string;
+  ytdlp_path: string;
+  batch_size: number;
+  tiktok_ratio: number;
+  instagram_ratio: number;
+  max_likes: number;
 }
 
 export type DraftStatus = "DRAFT" | "FILLED" | "PUBLISHED" | "CANCELLED";

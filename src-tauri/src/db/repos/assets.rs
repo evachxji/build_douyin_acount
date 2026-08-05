@@ -206,6 +206,25 @@ impl<'a> AssetsRepo<'a> {
         Ok(())
     }
 
+    /// 更新素材互动数据（采集器入库后回填点赞/评论/播放数）。
+    pub fn update_stats(
+        &self,
+        id: i64,
+        likes: i64,
+        comments: i64,
+        plays: i64,
+    ) -> Result<(), DomainError> {
+        let n = self.db.conn().execute(
+            "UPDATE video_assets SET likes = ?1, comments = ?2, plays = ?3,
+             updated_at = ?4 WHERE id = ?5",
+            params![likes, comments, plays, now(), id],
+        )?;
+        if n == 0 {
+            return Err(DomainError::AssetNotFound(id));
+        }
+        Ok(())
+    }
+
     /// 删除资产（分析结果、草稿、推荐等通过外键级联删除；文件删除由媒体服务负责）。
     pub fn delete(&self, id: i64) -> Result<(), DomainError> {
         let n = self.db.conn().execute("DELETE FROM video_assets WHERE id = ?1", params![id])?;

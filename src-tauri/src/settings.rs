@@ -19,6 +19,14 @@ pub struct AppSettings {
     pub node_bin: String,
     pub publisher_script: String,
     pub publisher_browser: String,
+    /// 采集 sidecar 与 yt-dlp 路径。
+    pub collector_script: String,
+    pub ytdlp_path: String,
+    /// 采集配额（均可配置）：每轮条数、平台比例、点赞上限。
+    pub batch_size: i64,
+    pub tiktok_ratio: f64,
+    pub instagram_ratio: f64,
+    pub max_likes: i64,
 }
 
 impl Default for AppSettings {
@@ -35,6 +43,12 @@ impl Default for AppSettings {
             node_bin: "node".to_string(),
             publisher_script: "scripts/douyin-publisher/publish.js".to_string(),
             publisher_browser: "chrome".to_string(),
+            collector_script: "scripts/collector/collect.js".to_string(),
+            ytdlp_path: "yt-dlp".to_string(),
+            batch_size: 20,
+            tiktok_ratio: 0.3,
+            instagram_ratio: 0.7,
+            max_likes: 1_000_000,
         }
     }
 }

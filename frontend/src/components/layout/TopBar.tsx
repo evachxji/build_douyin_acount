@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { api } from "../../api/client";
 import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useTaskStore } from "../../stores/taskStore";
@@ -28,6 +29,18 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
     if (!picked) return;
     const paths = typeof picked === "string" ? [picked] : picked;
     await importFiles(paths);
+  };
+
+  const handleCollect = async () => {
+    try {
+      const tasks = await api.startCollection();
+      setTaskOpen(true);
+      setTimeout(() => void useTaskStore.getState().refresh(), 1200);
+      return tasks;
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+      return null;
+    }
   };
 
   const handleAnalyze = async () => {
@@ -99,6 +112,13 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         className="h-9 rounded border border-line px-3 text-sm text-paper hover:border-accent/50 hover:bg-accent/10"
       >
         导入视频
+      </button>
+      <button
+        onClick={() => void handleCollect()}
+        className="h-9 rounded border border-accent bg-accent/10 px-3 text-sm text-accent hover:bg-accent/20"
+        title="按设置配额刷 TikTok / Instagram 推荐流采集并下载"
+      >
+        开始采集
       </button>
       <button
         onClick={() => void handleAnalyze()}

@@ -17,11 +17,11 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
   return (
     <article
       onClick={onFocus}
-      className={`group relative mb-4 break-inside-avoid cursor-pointer overflow-hidden rounded-lg border bg-panel transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/40 ${
+      className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-panel transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/40 ${
         focused ? "border-accent/70" : selected ? "border-accent/50" : "border-line hover:border-accent/40"
       }`}
     >
-      <div className="relative aspect-video overflow-hidden bg-panel2">
+      <div className="relative aspect-video shrink-0 overflow-hidden bg-panel2">
         {cover ? (
           <img
             src={cover}
@@ -35,7 +35,7 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
           </div>
         )}
         <div className="absolute left-2 top-2 flex items-center gap-1.5">
-          <span className="rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-paper/90 backdrop-blur">
+          <span className="rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-medium text-paper/95 backdrop-blur">
             {platformLabel(asset.source_platform)}
           </span>
           <StatusBadge status={asset.status} />
@@ -44,7 +44,7 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
           <ScoreBadge score={asset.quality_score} />
           {asset.is_favorite && <span className="text-accent text-sm leading-none">♥</span>}
         </div>
-        <span className="absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-paper/90 backdrop-blur">
+        <span className="absolute bottom-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-paper/95 backdrop-blur">
           {formatDuration(asset.duration_ms)}
         </span>
         {selected && (
@@ -54,7 +54,7 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
         )}
       </div>
 
-      <div className="p-3">
+      <div className="flex h-34 flex-col overflow-hidden p-3">
         <h3 className="line-clamp-2 text-sm leading-snug text-paper">
           {asset.title ?? `视频 #${asset.id}`}
         </h3>
@@ -71,7 +71,7 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
               </span>
             ))}
         </div>
-        <div className="mt-2 flex items-center justify-between text-[11px] text-mute">
+        <div className="mt-auto flex items-center justify-between text-[11px] text-mute">
           <span>{asset.author ?? "未知作者"}</span>
           <span className="tabular-nums">
             ♥ {formatCount(asset.likes)} · {formatCount(asset.comments)} 评
@@ -88,7 +88,7 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
         className={`absolute right-2 top-9 rounded border px-1.5 py-0.5 text-[10px] transition-colors ${
           selected
             ? "border-accent bg-accent text-ink"
-            : "border-white/20 bg-black/50 text-paper/80 hover:border-accent/60"
+            : "border-white/40 bg-black/80 text-paper/95 hover:border-accent/60"
         }`}
         title="多选切换"
       >

@@ -46,6 +46,10 @@ pub fn cancel_task(state: State<AppState>, id: i64) -> Result<(), ApiError> {
                     .map_err(ApiError::from)?;
             }
         }
+        if t.agent_name == "collector" {
+            crate::agents::collector::request_cancel(&state.store, t.id)
+                .map_err(ApiError::from)?;
+        }
     }
     Ok(())
 }
