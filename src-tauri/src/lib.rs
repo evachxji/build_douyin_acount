@@ -1,3 +1,6 @@
+pub mod db;
+pub mod domain;
+
 /// 应用信息命令：供前端冒烟测试与后续版本展示使用。
 #[tauri::command]
 fn app_info() -> serde_json::Value {
