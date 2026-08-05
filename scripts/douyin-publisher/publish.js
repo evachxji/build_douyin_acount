@@ -253,12 +253,14 @@ async function monitorAfterFill() {
 
 async function main() {
   writeProgress("browser_started", "正在打开抖音上传页（独立标签页）");
-  await openUploadPage();
-  // 文件选择弹窗由用户本人操作；此处仅给出路径并等待【已选择】。
+  // 先写出 waiting_for_file：程序端立即弹出人工确认窗口并自动复制路径，
+  // 与标签页打开并行，无需等页面/上传弹窗。
   writeProgress(
     "waiting_for_file",
     `请在打开的抖音页面点击「上传视频」，在文件选择弹窗中选择：${job.videoPath}`,
   );
+  await openUploadPage();
+  // 文件选择弹窗由用户本人操作；此处仅给出路径并等待【已选择】。
 
   const wait = await waitCancelOrContinue(60 * 60 * 1000);
   if (wait === "cancel") {

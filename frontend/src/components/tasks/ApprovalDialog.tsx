@@ -27,6 +27,7 @@ function DraftSummary({ draft }: { draft?: PublishDraft }) {
 function PublisherActions({ task }: { task: AgentTask }) {
   const resume = useTaskStore((s) => s.resume);
   const cancel = useTaskStore((s) => s.cancel);
+  const [copied, setCopied] = useState(false);
   const draftId = Number(task.payload.draft_id);
   const stage = task.payload.stage;
 
@@ -36,6 +37,17 @@ function PublisherActions({ task }: { task: AgentTask }) {
       void api.copyText(String(task.payload.path)).catch(() => {});
     }
   }, [stage, task.payload.path]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const copyPath = () => {
+    if (typeof task.payload.path !== "string") return;
+    void api
+      .copyText(task.payload.path)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -82,7 +94,17 @@ function PublisherActions({ task }: { task: AgentTask }) {
           <div className="text-[10px] uppercase tracking-wider text-mute">
             视频路径（已自动复制，在弹窗中按 Ctrl+V 粘贴即可）
           </div>
-          <code className="block truncate text-xs text-paper/85">{task.payload.path}</code>
+          <div className="mt-1 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate text-xs text-paper/85">
+              {task.payload.path}
+            </code>
+            <button
+              onClick={copyPath}
+              className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-mute hover:border-accent/50 hover:text-paper"
+            >
+              {copied ? "已复制" : "复制"}
+            </button>
+          </div>
         </div>
       )}
     </div>
