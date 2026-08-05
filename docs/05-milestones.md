@@ -73,13 +73,13 @@
 
 - [x] 浏览器编排：opencli 在用户已登录的 Chrome 中新开上传页标签（登录态复用，无需重新登录）
 - [x] 上传弹窗由用户手动操作：程序展示视频路径（一键复制）+【已选择】按钮
-- [x] Publisher Agent 流程：`prepare_publish` → 人工选文件 → 自动填标题/文案/话题 → WAITING_FOR_HUMAN → 人工确认发布
-- [x] GUI 发布流程面板与人工确认（选文件 / 我已发布 两阶段审批弹窗）
+- [x] Publisher Agent 流程：`prepare_publish` → 人工选文件（自动检测页面变化）→ 自动填标题/文案/话题 → WAITING_FOR_HUMAN → 人工确认发布
+- [x] GUI 发布流程面板与人工确认（选文件信息弹窗精简为标题/路径/复制；发布确认弹窗）
 
 验证（联调）：
 
 - [x] opencli 会话登录态确认（whoami：<douyin-account>）+ 上传页打开正常
-- [x] GUI 全流程冒烟（假 sidecar）：准备发布 → 选文件 → 已选择 → 我已发布 → 资产 PUBLISHED
+- [x] GUI 全流程冒烟（假 sidecar）：准备发布 → 选文件信息弹窗 → 自动填表 → 我已发布 → 资产 PUBLISHED
 - [x] 真实侧边车验证到「选文件」阶段；完整真实上传/填表/发布由用户手动选择文件后联调
 - [x] 代码审计：sidecar 与 Agent 无任何点击发布按钮的代码路径；发布完成仅由「发布成功」提示或用户确认产生
 
