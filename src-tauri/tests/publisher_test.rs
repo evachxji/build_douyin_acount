@@ -216,3 +216,12 @@ fn publisher_surfaces_sidecar_failure() {
     let err = env.agent.run(&ctx, task(&env)).expect_err("must fail");
     assert!(err.to_string().contains("selector not found"), "{err}");
 }
+
+#[test]
+fn clipboard_write_roundtrip() {
+    let text = format!("video-path-test-{}", std::process::id());
+    build_douyin_acount_lib::commands::publish::copy_to_clipboard(text.clone())
+        .expect("copy to clipboard");
+    let mut clipboard = arboard::Clipboard::new().expect("open clipboard");
+    assert_eq!(clipboard.get_text().expect("read clipboard"), text);
+}

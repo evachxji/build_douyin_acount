@@ -114,3 +114,14 @@ fn resume_publisher_task(state: &State<AppState>, draft_id: i64) -> Result<(), A
         })?;
     repo.resume(task.id).map_err(ApiError::from)
 }
+
+/// 把文本写入系统剪贴板（文件选择阶段自动复制视频路径，用户直接粘贴）。
+#[tauri::command]
+pub fn copy_to_clipboard(text: String) -> Result<(), ApiError> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| {
+        ApiError::from(DomainError::InvalidData(format!("clipboard error: {e}")))
+    })?;
+    clipboard.set_text(text).map_err(|e| {
+        ApiError::from(DomainError::InvalidData(format!("clipboard error: {e}")))
+    })
+}

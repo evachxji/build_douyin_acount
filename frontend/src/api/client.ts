@@ -72,4 +72,5 @@ export const api = {
     call<void>("publish_file_selected", { draftId }),
   publishConfirmed: (draftId: number) =>
     call<void>("publish_confirmed", { draftId }),
+  copyText: (text: string) => call<void>("copy_to_clipboard", { text }),
 };

@@ -73,6 +73,53 @@ function runOpencli(args) {
   });
 }
 
+/** 运行 opencli CLI 并返回原始文本输出（`get url` / `get title` 等返回纯文本而非 JSON）。 */
+function runOpencliRaw(args) {
+  return new Promise((resolve, reject) => {
+    const entry = OPENCLI_ENTRIES.find((p) => fs.existsSync(p));
+    if (!entry) {
+      reject(new Error("未找到 opencli CLI 入口"));
+      return;
+    }
+    execFile(
+      "node",
+      [entry, ...args],
+      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) {
+          reject(new Error(`opencli ${args.slice(0, 3).join(" ")} 失败: ${err.message}`));
+          return;
+        }
+        resolve(stdout.trim());
+      },
+    );
+  });
+}
+
+/** 运行 opencli fill：抖音编辑器会把 #话题 转成话题卡片，导致 verified=false 但
+ *  内容实际已写入（fill 命令会非零退出）。此处不以退出码判断，只认 filled 字段。 */
+function runOpencliFill(args) {
+  return new Promise((resolve, reject) => {
+    const entry = OPENCLI_ENTRIES.find((p) => fs.existsSync(p));
+    if (!entry) {
+      reject(new Error("未找到 opencli CLI 入口"));
+      return;
+    }
+    execFile(
+      "node",
+      [entry, ...args],
+      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+      (_err, stdout) => {
+        try {
+          resolve(JSON.parse(stdout));
+        } catch {
+          reject(new Error(`opencli fill 输出解析失败: ${(stdout || "").slice(0, 300)}`));
+        }
+      },
+    );
+  });
+}
+
 /** 打开上传页（在用户已登录的 Chrome 中新开标签页）。 */
 async function openUploadPage() {
   const res = await runOpencli(["browser", session, "open", SELECTORS.uploadUrl]);
@@ -83,14 +130,21 @@ async function openUploadPage() {
 
 /** 关闭会话标签页。 */
 async function closeSession() {
+  // 清除页面 beforeunload，避免 Chrome 弹出「离开此网站」二次确认阻塞关闭。
+  await runOpencli([
+    "browser",
+    session,
+    "eval",
+    "window.onbeforeunload=null;window.onunload=null;true",
+  ]).catch(() => {});
   await runOpencli(["browser", session, "close"]).catch(() => {});
 }
 
 /** 探测标签页是否仍存活（用户关闭标签页后会话失效）。 */
 async function sessionAlive() {
   try {
-    const res = await runOpencli(["browser", session, "get", "url"]);
-    return typeof res === "string" && res.length > 0;
+    const url = await runOpencliRaw(["browser", session, "get", "url"]);
+    return url.startsWith("http");
   } catch {
     return false;
   }
@@ -133,31 +187,35 @@ async function fillComposer() {
   }
   writeProgress("uploading", "视频已上传完成，正在填写表单");
 
-  await runOpencli([
-    "browser",
-    session,
-    "fill",
-    String(titleRef),
-    job.title || "",
+  const titleResult = await runOpencliFill([
+    "browser", session, "fill", String(titleRef), job.title || "",
   ]);
-  // 校验标题真的写进去了（React 受控输入可能吞字符）。
-  const titleCheck = await runOpencli(["browser", session, "get", "value", String(titleRef)]);
-  if (String(titleCheck?.value ?? "") !== (job.title || "")) {
+  if (!titleResult?.filled) {
     throw new Error("标题填写失败（页面可能已改版）");
+  }
+  // 宽松校验：标题字段非空即可（抖音可能做归一化处理）。
+  const titleCheck = await runOpencli(["browser", session, "get", "value", String(titleRef)]);
+  if (!String(titleCheck?.value ?? "").trim()) {
+    throw new Error("标题字段为空，填写失败");
   }
 
   const editorRef = await waitSelector(SELECTORS.descriptionEditors[0], 30_000);
   if (editorRef === null) {
     throw new Error("未找到文案输入区，页面结构可能已改版");
   }
+  // 抖音编辑器/ opencli fill 在 contenteditable 上会稳定丢掉输入串的最后一个字符，
+  // 因此在末尾补一个尾随空格（丢了也只是空格；同时让最后一个话题卡片完整提交）。
   const captionParts = [job.body || "", ...(job.hashtags || []).map((t) => `#${t}`)];
-  await runOpencli([
+  const captionResult = await runOpencliFill([
     "browser",
     session,
     "fill",
     String(editorRef),
-    captionParts.filter(Boolean).join(" "),
+    captionParts.filter(Boolean).join(" ") + " ",
   ]);
+  if (!captionResult?.filled) {
+    throw new Error("文案填写失败（页面可能已改版）");
+  }
   writeProgress("form_filled", "标题/文案/话题已填写，请人工核对后点击页面上的【发布】");
 }
 

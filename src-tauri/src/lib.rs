@@ -77,6 +77,7 @@ pub fn run() {
             commands::publish::list_drafts,
             commands::publish::publish_file_selected,
             commands::publish::publish_confirmed,
+            commands::publish::copy_to_clipboard,
             commands::tasks::list_tasks,
             commands::tasks::get_task,
             commands::tasks::cancel_task,

@@ -27,24 +27,15 @@ function DraftSummary({ draft }: { draft?: PublishDraft }) {
 function PublisherActions({ task }: { task: AgentTask }) {
   const resume = useTaskStore((s) => s.resume);
   const cancel = useTaskStore((s) => s.cancel);
-  const [copied, setCopied] = useState(false);
   const draftId = Number(task.payload.draft_id);
   const stage = task.payload.stage;
 
-  const copyPath = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+  // 弹出文件选择阶段时自动把视频路径写入系统剪贴板，用户直接 Ctrl+V 粘贴。
+  useEffect(() => {
+    if (stage === "file" && typeof task.payload.path === "string") {
+      void api.copyText(String(task.payload.path)).catch(() => {});
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  }, [stage, task.payload.path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -89,19 +80,9 @@ function PublisherActions({ task }: { task: AgentTask }) {
       {stage === "file" && typeof task.payload.path === "string" && (
         <div className="mt-1 w-full rounded border border-line bg-ink/80 p-2">
           <div className="text-[10px] uppercase tracking-wider text-mute">
-            视频路径（可复制后在文件选择弹窗中粘贴）
+            视频路径（已自动复制，在弹窗中按 Ctrl+V 粘贴即可）
           </div>
-          <div className="mt-1 flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate text-xs text-paper/85">
-              {task.payload.path}
-            </code>
-            <button
-              onClick={() => void copyPath(String(task.payload.path))}
-              className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-mute hover:border-accent/50 hover:text-paper"
-            >
-              {copied ? "已复制" : "复制"}
-            </button>
-          </div>
+          <code className="block truncate text-xs text-paper/85">{task.payload.path}</code>
         </div>
       )}
     </div>
