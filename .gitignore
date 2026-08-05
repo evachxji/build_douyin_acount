@@ -1,0 +1,45 @@
+# ---- Rust / Tauri ----
+/src-tauri/target/
+/src-tauri/gen/
+*.rs.bk
+
+# ---- Node / frontend ----
+/frontend/node_modules/
+/frontend/dist/
+*.local
+npm-debug.log*
+pnpm-debug.log*
+
+# ---- Local data (assets, db, logs, browser profiles) ----
+/storage/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ---- Media artifacts ----
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.wav
+*.m4a
+*.jpg
+*.jpeg
+*.png
+
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Logs ----
+logs/
+*.log
