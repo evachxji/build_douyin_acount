@@ -62,6 +62,26 @@ impl<'a> TasksRepo<'a> {
         Ok(row)
     }
 
+    /// 任务列表；status 为 None 时返回全部（最新在前），供 GUI 任务面板轮询。
+    pub fn list(&self, status: Option<TaskStatus>) -> Result<Vec<AgentTask>, DomainError> {
+        let conn = self.db.conn();
+        let mut stmt = match status {
+            Some(_) => conn.prepare(
+                "SELECT * FROM agent_tasks WHERE status = ?1 ORDER BY created_at DESC",
+            )?,
+            None => conn.prepare("SELECT * FROM agent_tasks ORDER BY created_at DESC")?,
+        };
+        let rows = match status {
+            Some(s) => stmt
+                .query_map(params![s.to_string()], row_to_task)?
+                .collect::<Result<Vec<_>, _>>()?,
+            None => stmt
+                .query_map([], row_to_task)?
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        Ok(rows)
+    }
+
     /// 领取下一个可执行任务（同一 Agent 串行：存在 RUNNING/WAITING_FOR_HUMAN 时返回 None）。
     pub fn claim_next(&self, agent_name: &str) -> Result<Option<AgentTask>, DomainError> {
         let conn = self.db.conn();

@@ -30,6 +30,12 @@ impl WhisperAsr {
             model: model.into(),
         }
     }
+
+    /// 覆盖 Python 解释器路径（GUI 设置中的 whisper_python）。
+    pub fn with_python(mut self, python: impl Into<String>) -> Self {
+        self.python = python.into();
+        self
+    }
 }
 
 impl Asr for WhisperAsr {

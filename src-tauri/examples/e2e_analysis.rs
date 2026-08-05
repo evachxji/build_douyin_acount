@@ -3,7 +3,7 @@
 //!
 //! 环境变量（均可选）：
 //!   OLLAMA_URL     默认 http://localhost:11434
-//!   VISION_MODEL   默认 qwen2.5-vl:7b
+//!   VISION_MODEL   默认 qwen2.5vl:7b
 //!   LLM_MODEL      默认 qwen2.5:7b
 //!   WHISPER_PYTHON 默认 scripts/whisper-server/.venv/Scripts/python.exe
 //!   WHISPER_SCRIPT 默认 scripts/whisper-server/whisper_transcribe.py
@@ -41,7 +41,7 @@ fn main() {
     );
     let whisper_model = env_or("WHISPER_MODEL", "base");
     let ollama_url = env_or("OLLAMA_URL", "http://localhost:11434");
-    let vision_model = env_or("VISION_MODEL", "qwen2.5-vl:7b");
+    let vision_model = env_or("VISION_MODEL", "qwen2.5vl:7b");
     let llm_model = env_or("LLM_MODEL", "qwen2.5:7b");
 
     println!("video: {}", video.display());
@@ -52,7 +52,7 @@ fn main() {
     let llm_client = AiClient::new(ollama_url).expect("ai client");
     let pipeline = AnalysisPipeline::new(
         Arc::new(FfmpegFrameExtractor),
-        Arc::new(WhisperAsr::new(script, whisper_model)),
+        Arc::new(WhisperAsr::new(script, whisper_model).with_python(python)),
         Arc::new(OllamaVision {
             client: vision_client,
             model: vision_model,

@@ -223,6 +223,30 @@ impl<'a> AssetsRepo<'a> {
         )?;
         Ok(n)
     }
+
+    /// 按分析分类统计资产数（未分析归入"未分类"），供左侧分类树使用。
+    pub fn category_counts(&self) -> Result<Vec<(String, i64)>, DomainError> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(ar.category, '未分类') AS category, COUNT(*) AS c
+             FROM video_assets va
+             LEFT JOIN analysis_results ar ON ar.asset_id = va.id
+             GROUP BY category
+             ORDER BY c DESC, category ASC",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// 按状态统计资产数，供左侧状态分组与顶栏使用。
+    pub fn status_counts(&self) -> Result<Vec<(String, i64)>, DomainError> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT status, COUNT(*) FROM video_assets GROUP BY status ORDER BY status ASC",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
 }
 
 fn now() -> String {

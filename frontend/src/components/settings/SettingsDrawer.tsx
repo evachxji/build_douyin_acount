@@ -1,0 +1,125 @@
+import { useEffect, useState } from "react";
+import { api } from "../../api/client";
+import type { AppSettings } from "../../api/types";
+
+const EMPTY: AppSettings = {
+  ollama_url: "",
+  vision_model: "",
+  llm_model: "",
+  whisper_python: "",
+  whisper_script: "",
+  whisper_model: "",
+  english_ratio_threshold: 0.6,
+  quality_min_keep: 60,
+};
+
+export function SettingsDrawer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [settings, setSettings] = useState<AppSettings>(EMPTY);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setSaved(false);
+      setError(null);
+      void api.getSettings().then(setSettings).catch((e) => setError(String(e)));
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const set = (patch: Partial<AppSettings>) =>
+    setSettings((s) => ({ ...s, ...patch }));
+
+  const save = async () => {
+    try {
+      await api.updateSettings(settings);
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const field =
+    "h-9 w-full rounded border border-line bg-ink px-2 text-sm text-paper focus:border-accent/60 focus:outline-none";
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm">
+      <div className="flex h-full w-[420px] flex-col border-l border-line bg-panel p-5 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-paper">设置</h2>
+          <button onClick={onClose} className="text-sm text-mute hover:text-paper">
+            ✕
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3 overflow-y-auto text-sm">
+          <label className="block">
+            <span className="text-xs text-mute">Ollama 地址</span>
+            <input className={field} value={settings.ollama_url} onChange={(e) => set({ ollama_url: e.target.value })} />
+          </label>
+          <label className="block">
+            <span className="text-xs text-mute">视觉模型（Vision）</span>
+            <input className={field} value={settings.vision_model} onChange={(e) => set({ vision_model: e.target.value })} />
+          </label>
+          <label className="block">
+            <span className="text-xs text-mute">文本模型（LLM）</span>
+            <input className={field} value={settings.llm_model} onChange={(e) => set({ llm_model: e.target.value })} />
+          </label>
+          <label className="block">
+            <span className="text-xs text-mute">Whisper 模型</span>
+            <input className={field} value={settings.whisper_model} onChange={(e) => set({ whisper_model: e.target.value })} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs text-mute">英文对白阈值（0-1）</span>
+              <input
+                type="number"
+                step="0.05"
+                className={field}
+                value={settings.english_ratio_threshold}
+                onChange={(e) => set({ english_ratio_threshold: Number(e.target.value) })}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-mute">质量分保留线（0-100）</span>
+              <input
+                type="number"
+                className={field}
+                value={settings.quality_min_keep}
+                onChange={(e) => set({ quality_min_keep: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+          <p className="text-[11px] leading-relaxed text-mute">
+            修改模型或阈值后，下一次 AI 分析立即生效；已保存到本地数据库。
+          </p>
+        </div>
+
+        {error && <p className="mt-3 text-xs text-bad">{error}</p>}
+        {saved && <p className="mt-3 text-xs text-ok">已保存 ✓</p>}
+
+        <div className="mt-auto flex gap-2">
+          <button
+            onClick={onClose}
+            className="h-9 flex-1 rounded border border-line text-sm text-mute hover:text-paper"
+          >
+            取消
+          </button>
+          <button
+            onClick={() => void save()}
+            className="h-9 flex-1 rounded border border-accent bg-accent text-sm font-semibold text-ink hover:brightness-110"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

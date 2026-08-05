@@ -2,11 +2,11 @@
 
 每个阶段以"编译运行 → 测试 → 输出进度 → 等待指令"收尾。
 
-## 第一阶段：需求分析与架构设计（当前）
+## 第一阶段：需求分析与架构设计（完成）
 
 - [x] 需求分析、系统架构、技术选型、目录结构文档
-- [ ] 创建 GitHub 同名仓库 `build_douyin_acount` 并推送
-- [ ] 初始化 Tauri 2 + React 脚手架（空壳可编译运行）
+- [x] 创建 GitHub 同名私有仓库 `build_douyin_acount` 并推送（<github-account>/build_douyin_acount）
+- [x] 初始化 Tauri 2 + React 脚手架（空壳可编译运行）
 
 验证：
 
@@ -55,17 +55,19 @@
 
 ## 第三阶段：GUI + 视频浏览
 
-- [ ] Tauri commands 全量暴露（assets / collection / analysis / drafts / tasks / settings）
-- [ ] 三栏布局：分类树 / 瀑布流 / 详情
-- [ ] 视频播放、多选、收藏、删除、状态徽章
-- [ ] 任务队列面板 + 人工审批对话框
-- [ ] 采集进度可视化（目标 100 条，TikTok/IG 各自进度）
+- [x] Tauri commands 全量暴露（assets / analysis / tasks / settings；collection / drafts 随第四、五阶段实现）
+- [x] 三栏布局：分类树 / 瀑布流 / 详情
+- [x] 视频播放、多选、收藏、删除、状态徽章
+- [x] 任务队列面板 + 人工审批对话框
+- [ ] 采集进度可视化（目标 100 条，TikTok/IG 各自进度；随采集模块实现）
 
 验证：
 
-- 使用第二阶段入库的样本数据浏览操作
-- 播放本地视频正常；筛选/排序正确
-- `pnpm build` + `cargo tauri build` 无错误
+- [x] 使用种子数据（10 条：IG 7 / TT 3）浏览操作：分类/状态/平台/收藏/搜索筛选均正确
+- [x] 详情面板视频可播放（asset protocol 加载，readyState=4）；收藏持久化到库
+- [x] `pnpm test`（5 个）+ `cargo test`（49 个）+ `cargo clippy --all-targets` 零告警
+- [x] `pnpm tauri dev` 冒烟：窗口正常打开，三栏渲染无加载错误（CDP 校验 + 截图）
+- [ ] `cargo tauri build` 发布包构建（随第四阶段一并执行）
 
 ## 第四阶段：抖音发布辅助
 

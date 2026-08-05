@@ -1,1 +1,55 @@
 @import "tailwindcss";
+
+@theme {
+  --color-ink: #171310;
+  --color-panel: #1f1a16;
+  --color-panel2: #262019;
+  --color-line: #3a312a;
+  --color-paper: #ece3d6;
+  --color-mute: #a3988b;
+  --color-accent: #e8a33d;
+  --color-ok: #7fb069;
+  --color-warn: #e0b341;
+  --color-bad: #d1603d;
+  --color-info: #6fa8dc;
+  --font-ui: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 细滚动条，贴合深色工作台氛围 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #3a312a;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #55483d;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+select option {
+  background-color: #1f1a16;
+  color: #ece3d6;
+}
+
+video {
+  background-color: #000;
+}
