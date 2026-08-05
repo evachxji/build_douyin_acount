@@ -35,7 +35,7 @@ def sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def download_blob(url: str, dest: str, expected_sha: str, retries: int = 40) -> None:
+def download_blob(url: str, dest: str, expected_sha: str, expected_size: int, retries: int = 40) -> None:
     """curl -L -C - 断点续传下载，失败自动重试；完成后校验 sha256。"""
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
         try:
@@ -54,8 +54,15 @@ def download_blob(url: str, dest: str, expected_sha: str, retries: int = 40) -> 
             "-L",
             "-C",
             "-",
+            "--retry",
+            "3",
+            "--retry-all-errors",
+            "--retry-delay",
+            "3",
             "--connect-timeout",
             "20",
+            "--max-time",
+            "600",
         ]
         if proxy:
             cmd += ["-x", proxy]
@@ -68,15 +75,17 @@ def download_blob(url: str, dest: str, expected_sha: str, retries: int = 40) -> 
         if proc.returncode != 0:
             print(f"    retry: {proc.stderr.strip()[-160:]}", flush=True)
             continue
-        try:
-            actual = sha256_file(dest)
-        except OSError as exc:
-            print(f"    retry (read error): {exc}", flush=True)
+        # 先按大小判断：不完整就续传，避免把大文件删掉重下。
+        size = os.path.getsize(dest) if os.path.exists(dest) else 0
+        if size < expected_size:
+            print(f"    retry: size {size} < expected {expected_size}", flush=True)
             continue
+        # 大小一致才做 sha256 终验。
+        actual = sha256_file(dest)
         if actual == expected_sha:
             print(f"  complete: {os.path.basename(dest)}", flush=True)
             return
-        print(f"    retry: sha mismatch (have {len(open(dest, 'rb').read())} bytes)", flush=True)
+        print(f"    retry: sha mismatch at full size {size}", flush=True)
         os.remove(dest)
     raise RuntimeError(f"failed to download {dest} after {retries} attempts")
 
@@ -96,8 +105,8 @@ def install_model(repo: str, tag: str, base_dir: str) -> None:
         sha = digest[len("sha256:"):]
         dest = os.path.join(blobs_dir, f"sha256-{sha}")
         url = f"{REGISTRY}/v2/{repo}/blobs/{digest}"
-        print(f"  [{kind}] {digest}")
-        download_blob(url, dest, sha)
+        print(f"  [{kind}] {digest} ({entry.get('size', '?')} bytes)")
+        download_blob(url, dest, sha, int(entry.get("size", 0)))
 
     manifest_dir = os.path.join(base_dir, "manifests", REGISTRY.removeprefix("https://"), repo, tag)
     os.makedirs(manifest_dir, exist_ok=True)
