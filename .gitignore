@@ -43,3 +43,8 @@ desktop.ini
 # ---- Logs ----
 logs/
 *.log
+
+# ---- Python venv (whisper sidecar) ----
+/scripts/whisper-server/.venv/
+__pycache__/
+*.pyc
