@@ -51,3 +51,26 @@ fn task_status_rejects_illegal_transitions() {
     assert!(!TaskStatus::Succeeded.can_transition_to(&TaskStatus::Running));
     assert!(!TaskStatus::Cancelled.can_transition_to(&TaskStatus::Running));
 }
+
+#[test]
+fn asset_status_serde_roundtrip_matches_database_strings() {
+    // 序列化结果必须与 DB/Display 字符串一致（LOW_PRIORITY / DOWNLOAD_FAILED 带下划线），
+    // 否则前端状态徽章与筛选会拿到 LOWPRIORITY 之类的裸值。
+    let cases: &[(AssetStatus, &str)] = &[
+        (AssetStatus::New, "NEW"),
+        (AssetStatus::Analyzing, "ANALYZING"),
+        (AssetStatus::Ready, "READY"),
+        (AssetStatus::Selected, "SELECTED"),
+        (AssetStatus::Published, "PUBLISHED"),
+        (AssetStatus::Skipped, "SKIPPED"),
+        (AssetStatus::LowPriority, "LOW_PRIORITY"),
+        (AssetStatus::DownloadFailed, "DOWNLOAD_FAILED"),
+    ];
+    for (status, expected) in cases {
+        let json = serde_json::to_string(status).expect("serialize");
+        assert_eq!(json, format!("\"{expected}\""), "status {expected}");
+        let back: AssetStatus = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, *status);
+        assert_eq!(status.to_string(), *expected, "Display must match DB string");
+    }
+}

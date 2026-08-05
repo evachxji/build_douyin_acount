@@ -4,7 +4,7 @@ use super::error::DomainError;
 
 /// 视频资产生命周期状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AssetStatus {
     New,
     Analyzing,

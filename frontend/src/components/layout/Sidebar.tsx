@@ -1,4 +1,5 @@
 import { useAssetsStore } from "../../stores/assetsStore";
+import { statusMeta } from "../../lib/format";
 
 const STATUS_ORDER = [
   "NEW",
@@ -62,7 +63,7 @@ export function Sidebar() {
               filter.status === status ? "bg-accent/15 text-accent" : "text-paper/80 hover:bg-white/5"
             }`}
           >
-            <span>{status}</span>
+            <span>{statusMeta(status).label}</span>
             <span className="tabular-nums text-mute">{count}</span>
           </button>
         );
