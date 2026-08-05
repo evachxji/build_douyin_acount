@@ -16,6 +16,7 @@ export function Waterfall() {
   const error = useAssetsStore((s) => s.error);
   const reload = useAssetsStore((s) => s.load);
   const removeMany = useAssetsStore((s) => s.removeMany);
+  const favoriteMany = useAssetsStore((s) => s.favoriteMany);
   const ids = useSelectionStore((s) => s.ids);
   const focusId = useSelectionStore((s) => s.focusId);
   const focus = useSelectionStore((s) => s.focus);
@@ -90,6 +91,10 @@ export function Waterfall() {
     clear();
   };
 
+  const handleFavoriteAll = async (favorite: boolean) => {
+    await favoriteMany([...ids], favorite);
+  };
+
   const marqueeStyle =
     drag && gridRef.current
       ? (() => {
@@ -160,20 +165,46 @@ export function Waterfall() {
       </main>
 
       {ids.size > 0 && (
-        <div className="flex h-12 shrink-0 items-center justify-center gap-3 border-t border-line bg-panel px-4">
+        <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-t border-line bg-panel px-4">
           <span className="text-sm text-paper/85">已选中 {ids.size} 个视频</span>
-          <button
-            onClick={() => void handleBatchDelete()}
-            className="h-8 rounded border border-bad/50 px-4 text-sm text-bad transition-colors hover:bg-bad/10"
-          >
-            删除
-          </button>
-          <button
-            onClick={clear}
-            className="h-8 rounded border border-line px-4 text-sm text-mute transition-colors hover:text-paper"
-          >
-            取消
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => replace(assets.map((a) => a.id))}
+              className="h-8 rounded border border-line px-3 text-sm text-mute transition-colors hover:border-accent/50 hover:text-paper"
+            >
+              全选
+            </button>
+            <button
+              onClick={clear}
+              className="h-8 rounded border border-line px-3 text-sm text-mute transition-colors hover:border-accent/50 hover:text-paper"
+            >
+              取消全选
+            </button>
+            <button
+              onClick={() => void handleFavoriteAll(true)}
+              className="h-8 rounded border border-accent/50 px-3 text-sm text-accent transition-colors hover:bg-accent/10"
+            >
+              收藏
+            </button>
+            <button
+              onClick={() => void handleFavoriteAll(false)}
+              className="h-8 rounded border border-line px-3 text-sm text-mute transition-colors hover:border-accent/50 hover:text-paper"
+            >
+              取消收藏
+            </button>
+            <button
+              onClick={() => void handleBatchDelete()}
+              className="h-8 rounded border border-bad/50 px-3 text-sm text-bad transition-colors hover:bg-bad/10"
+            >
+              删除
+            </button>
+            <button
+              onClick={clear}
+              className="h-8 rounded border border-line px-3 text-sm text-mute transition-colors hover:text-paper"
+            >
+              取消
+            </button>
+          </div>
         </div>
       )}
     </div>

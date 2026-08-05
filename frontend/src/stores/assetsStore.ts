@@ -12,6 +12,7 @@ interface AssetsState {
   load: () => Promise<void>;
   setFilter: (patch: Partial<FilterState>) => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
+  favoriteMany: (ids: number[], favorite: boolean) => Promise<void>;
   removeAsset: (id: number) => Promise<void>;
   removeMany: (ids: number[]) => Promise<void>;
   updateStatus: (id: number, to: string) => Promise<void>;
@@ -48,6 +49,11 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     const asset = get().assets.find((a) => a.id === id);
     if (!asset) return;
     await api.setFavorite(id, !asset.is_favorite);
+    await get().load();
+  },
+
+  favoriteMany: async (ids, favorite) => {
+    await Promise.all(ids.map((id) => api.setFavorite(id, favorite)));
     await get().load();
   },
 

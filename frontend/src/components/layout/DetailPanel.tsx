@@ -184,14 +184,17 @@ export function DetailPanel() {
             {analysis.summary && (
               <p className="text-[13px] leading-relaxed text-paper/75">{analysis.summary}</p>
             )}
-            <div className="rounded border border-accent/25 bg-accent/5 p-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-accent/80">
-                推荐文案
+            {/* 已生成风格化 AI 文案时不再重复展示分析推荐文案 */}
+            {!copy && (
+              <div className="rounded border border-accent/25 bg-accent/5 p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-accent/80">
+                  推荐文案
+                </div>
+                <p className="mt-1 text-[13px] leading-relaxed text-paper/85">
+                  {analysis.recommended_caption || "—"}
+                </p>
               </div>
-              <p className="mt-1 text-[13px] leading-relaxed text-paper/85">
-                {analysis.recommended_caption || "—"}
-              </p>
-            </div>
+            )}
             {analysis.asr_text && (
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-mute">

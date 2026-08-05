@@ -102,11 +102,11 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
         )}
       </div>
 
-      <div className="flex h-34 flex-col overflow-hidden p-3">
+      <div className="flex h-29 flex-col overflow-hidden p-3">
         <h3 className="line-clamp-2 text-sm leading-snug text-paper">
           {asset.title ?? `视频 #${asset.id}`}
         </h3>
-        <div className="mt-2 flex flex-wrap gap-1">
+        <div className="mt-2 flex flex-nowrap gap-1 overflow-hidden">
           {[asset.category, ...(asset.tags ?? [])]
             .filter(Boolean)
             .slice(0, 4)
@@ -119,7 +119,7 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
               </span>
             ))}
         </div>
-        <div className="mt-auto flex items-center justify-between text-[11px] text-mute">
+        <div className="mt-2 flex items-center justify-between text-[11px] text-mute">
           <span>{asset.author ?? "未知作者"}</span>
           <span className="tabular-nums">
             ♥ {formatCount(asset.likes)} · {formatCount(asset.comments)} 评
