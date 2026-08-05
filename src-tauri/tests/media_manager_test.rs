@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+﻿use std::path::PathBuf;
 use std::process::Command;
 
 use build_douyin_acount_lib::db::Database;
@@ -125,7 +125,7 @@ fn video_manager_favorite_and_status_flow() {
 
     // NEW -> ANALYZING -> READY -> SELECTED -> PUBLISHED 全链路合法
     mgr.update_status(asset.id, AssetStatus::Analyzing).expect("analyzing");
-    mgr.update_status(asset.id, AssetStatus::Ready).expect("ready");
+    mgr.update_status(asset.id, AssetStatus::Candidate).expect("CANDIDATE");
     mgr.update_status(asset.id, AssetStatus::Selected).expect("selected");
     mgr.update_status(asset.id, AssetStatus::Published).expect("published");
     assert_eq!(

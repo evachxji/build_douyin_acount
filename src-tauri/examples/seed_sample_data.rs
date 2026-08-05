@@ -1,4 +1,4 @@
-//! 开发期种子数据工具：向 storage/db/app.db 灌入 10 条示例视频资产，
+﻿//! 开发期种子数据工具：向 storage/db/app.db 灌入 10 条示例视频资产，
 //! 其中 9 条附带模拟 AI 分析结果（覆盖宠物/美食/手工/风景/生活 + 未分类跳过样例），
 //! 供第三阶段 GUI 瀑布流、详情面板、筛选与任务列表冒烟测试使用。
 //!
@@ -25,7 +25,7 @@ struct Sample {
     likes: i64,
     comments: i64,
     plays: i64,
-    status: &'static str, // "ready" | "new" | "skipped"
+    status: &'static str, // "CANDIDATE" | "new" | "ELIMINATED"
     favorite: bool,
     category: Option<&'static str>,
     tags: &'static [&'static str],
@@ -44,7 +44,7 @@ const SAMPLES: &[Sample] = &[
         likes: 182_000,
         comments: 2_340,
         plays: 860_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: true,
         category: Some("宠物"),
         tags: &["猫", "萌宠", "治愈", "日常"],
@@ -61,7 +61,7 @@ const SAMPLES: &[Sample] = &[
         likes: 96_000,
         comments: 1_120,
         plays: 420_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: false,
         category: Some("宠物"),
         tags: &["狗", "萌宠", "搞笑"],
@@ -78,7 +78,7 @@ const SAMPLES: &[Sample] = &[
         likes: 245_000,
         comments: 3_890,
         plays: 1_200_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: true,
         category: Some("美食"),
         tags: &["做饭", "早餐", "治愈"],
@@ -95,7 +95,7 @@ const SAMPLES: &[Sample] = &[
         likes: 54_000,
         comments: 860,
         plays: 310_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: false,
         category: Some("美食"),
         tags: &["探店", "烧腊", "城市"],
@@ -112,7 +112,7 @@ const SAMPLES: &[Sample] = &[
         likes: 132_000,
         comments: 2_010,
         plays: 640_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: false,
         category: Some("手工"),
         tags: &["DIY", "木工", "制作过程"],
@@ -129,7 +129,7 @@ const SAMPLES: &[Sample] = &[
         likes: 310_000,
         comments: 4_500,
         plays: 1_800_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: true,
         category: Some("风景"),
         tags: &["自然", "森林", "治愈"],
@@ -146,7 +146,7 @@ const SAMPLES: &[Sample] = &[
         likes: 78_000,
         comments: 1_050,
         plays: 380_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: false,
         category: Some("风景"),
         tags: &["城市", "夜景", "旅行"],
@@ -163,7 +163,7 @@ const SAMPLES: &[Sample] = &[
         likes: 41_000,
         comments: 620,
         plays: 190_000,
-        status: "ready",
+        status: "CANDIDATE",
         favorite: false,
         category: Some("生活"),
         tags: &["日常", "咖啡", "治愈"],
@@ -197,7 +197,7 @@ const SAMPLES: &[Sample] = &[
         likes: 460_000,
         comments: 8_200,
         plays: 2_400_000,
-        status: "skipped",
+        status: "ELIMINATED",
         favorite: false,
         category: None,
         tags: &["英文口播"],
@@ -279,8 +279,8 @@ fn main() {
                 .update_status(asset.id, AssetStatus::Analyzing)
                 .expect("transition to analyzing");
             let target = match s.status {
-                "ready" => AssetStatus::Ready,
-                "skipped" => AssetStatus::Skipped,
+                "CANDIDATE" => AssetStatus::Candidate,
+                "ELIMINATED" => AssetStatus::Eliminated,
                 _ => unreachable!(),
             };
             manager
@@ -289,7 +289,7 @@ fn main() {
         }
 
         // 写入模拟分析结果（new 状态样例故意不写，模拟未分析素材）。
-        if s.status == "ready" || s.status == "skipped" {
+        if s.status == "CANDIDATE" || s.status == "ELIMINATED" {
             AnalysesRepo::new(&db)
                 .upsert(NewAnalysis {
                     asset_id: asset.id,

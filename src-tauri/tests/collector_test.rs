@@ -1,4 +1,4 @@
-//! Collector Agent 集成测试：用假采集 sidecar 验证「采集完成 -> 导入素材库 -> 入队分析」。
+﻿//! Collector Agent 集成测试：用假采集 sidecar 验证「采集完成 -> 导入素材库 -> 入队分析」。
 use std::path::{Path, PathBuf};
 
 use build_douyin_acount_lib::agents::collector::CollectorAgent;

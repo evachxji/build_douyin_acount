@@ -1,4 +1,4 @@
-use build_douyin_acount_lib::db::Database;
+﻿use build_douyin_acount_lib::db::Database;
 use build_douyin_acount_lib::db::repos::analyses::AnalysesRepo;
 use build_douyin_acount_lib::db::repos::assets::AssetsRepo;
 use build_douyin_acount_lib::domain::analysis::NewAnalysis;
@@ -74,14 +74,14 @@ fn status_counts_match_inserted_rows() {
     let b = repo.insert(sample_asset("b")).expect("insert b");
     repo.insert(sample_asset("c")).expect("insert c");
     repo.update_status(a, AssetStatus::Analyzing).expect("analyzing");
-    repo.update_status(a, AssetStatus::Ready).expect("ready");
+    repo.update_status(a, AssetStatus::Candidate).expect("CANDIDATE");
     repo.update_status(b, AssetStatus::Analyzing).expect("analyzing b");
-    repo.update_status(b, AssetStatus::Ready).expect("ready b");
+    repo.update_status(b, AssetStatus::Candidate).expect("ready b");
     repo.update_status(b, AssetStatus::Selected).expect("selected");
 
     let counts = repo.status_counts().expect("counts");
     let map: std::collections::HashMap<String, i64> = counts.into_iter().collect();
     assert_eq!(map.get("NEW"), Some(&1));
-    assert_eq!(map.get("READY"), Some(&1));
+    assert_eq!(map.get("CANDIDATE"), Some(&1));
     assert_eq!(map.get("SELECTED"), Some(&1));
 }

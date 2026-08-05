@@ -1,4 +1,4 @@
-use build_douyin_acount_lib::db::Database;
+﻿use build_douyin_acount_lib::db::Database;
 use build_douyin_acount_lib::db::repos::assets::{AssetFilter, AssetsRepo};
 use build_douyin_acount_lib::db::repos::analyses::AnalysesRepo;
 use build_douyin_acount_lib::db::repos::tasks::TasksRepo;
@@ -99,7 +99,7 @@ fn asset_status_transition_validated_on_update() {
         .update_status(id, AssetStatus::Published)
         .expect_err("illegal transition must fail");
     assert!(err.to_string().contains("transition"), "got: {err}");
-    repo.update_status(id, AssetStatus::Ready).expect("ok");
+    repo.update_status(id, AssetStatus::Candidate).expect("ok");
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn asset_list_filters_by_status_and_category() {
     let analyses = AnalysesRepo::new(&db);
     let id = assets.insert(sample_asset("cat_video")).expect("insert");
     assets.update_status(id, AssetStatus::Analyzing).expect("analyzing");
-    assets.update_status(id, AssetStatus::Ready).expect("ready");
+    assets.update_status(id, AssetStatus::Candidate).expect("CANDIDATE");
     analyses.upsert(NewAnalysis {
         asset_id: id,
         category: Some("宠物".to_string()),
@@ -140,7 +140,7 @@ fn asset_list_filters_by_status_and_category() {
     })
     .expect("analysis");
 
-    let ready = assets.list(AssetFilter { status: Some(AssetStatus::Ready), ..Default::default() }).expect("list");
+    let ready = assets.list(AssetFilter { status: Some(AssetStatus::Candidate), ..Default::default() }).expect("list");
     assert_eq!(ready.len(), 1);
     let cats = assets.list(AssetFilter { category: Some("宠物".to_string()), ..Default::default() }).expect("list");
     assert_eq!(cats.len(), 1);

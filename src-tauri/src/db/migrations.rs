@@ -113,4 +113,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 状态模型重构（第五阶段）：READY -> CANDIDATE；SKIPPED/LOW_PRIORITY -> ELIMINATED
+UPDATE video_assets SET status = 'CANDIDATE' WHERE status = 'READY';
+UPDATE video_assets SET status = 'ELIMINATED' WHERE status IN ('SKIPPED', 'LOW_PRIORITY');
 "#;

@@ -23,13 +23,12 @@ export interface StatusMeta {
 }
 
 const STATUS_META: Record<string, StatusMeta> = {
-  NEW: { label: "新入库", tone: "neutral" },
+  NEW: { label: "待处理", tone: "neutral" },
   ANALYZING: { label: "分析中", tone: "running" },
-  READY: { label: "可发布", tone: "ready" },
+  CANDIDATE: { label: "候选", tone: "ready" },
   SELECTED: { label: "待发布", tone: "selected" },
   PUBLISHED: { label: "已发布", tone: "published" },
-  SKIPPED: { label: "已跳过", tone: "neutral" },
-  LOW_PRIORITY: { label: "低优先级", tone: "warn" },
+  ELIMINATED: { label: "淘汰", tone: "warn" },
   DOWNLOAD_FAILED: { label: "下载失败", tone: "danger" },
   PENDING: { label: "排队中", tone: "neutral" },
   RUNNING: { label: "执行中", tone: "running" },

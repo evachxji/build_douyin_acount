@@ -47,7 +47,7 @@ impl FilterAgent {
         Self { rules }
     }
 
-    /// 依据分析结果判定保留/跳过/低优先级。
+    /// 依据分析结果判定保留/淘汰。
     pub fn evaluate(analysis: &NewAnalysis, rules: &FilterRules) -> Result<FilterVerdict, DomainError> {
         if analysis.has_large_amount_english_subtitle {
             return Ok(FilterVerdict::SkipDownload);
@@ -70,12 +70,11 @@ impl FilterAgent {
         Ok(FilterVerdict::Keep)
     }
 
-    /// 将判定结果映射为资产状态。
+    /// 将判定结果映射为资产状态：保留 -> 候选；其余（英文主导/质量不佳）统一淘汰。
     pub fn verdict_status(verdict: FilterVerdict) -> AssetStatus {
         match verdict {
-            FilterVerdict::Keep => AssetStatus::Ready,
-            FilterVerdict::SkipDownload => AssetStatus::Skipped,
-            FilterVerdict::LowPriority => AssetStatus::LowPriority,
+            FilterVerdict::Keep => AssetStatus::Candidate,
+            FilterVerdict::SkipDownload | FilterVerdict::LowPriority => AssetStatus::Eliminated,
         }
     }
 }

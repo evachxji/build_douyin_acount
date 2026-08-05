@@ -67,26 +67,35 @@ export function DetailPanel() {
   }
 
   const nextStatus =
-    asset.status === "READY"
+    asset.status === "CANDIDATE"
       ? "SELECTED"
       : asset.status === "SELECTED"
         ? "PUBLISHED"
         : asset.status === "PUBLISHED"
-          ? "READY"
-          : asset.status === "LOW_PRIORITY"
-            ? "READY"
+          ? "CANDIDATE"
+          : asset.status === "ELIMINATED"
+            ? "CANDIDATE"
             : null;
 
   const statusActionLabel =
-    asset.status === "READY"
-      ? "加入待发布"
+    asset.status === "CANDIDATE"
+      ? "通过"
       : asset.status === "SELECTED"
         ? "标记已发布"
         : asset.status === "PUBLISHED"
           ? "撤销发布"
-          : asset.status === "LOW_PRIORITY"
-            ? "恢复可发布"
+          : asset.status === "ELIMINATED"
+            ? "恢复候选"
             : null;
+
+  const handleStatusAction = async () => {
+    if (!nextStatus) return;
+    await updateStatus(asset.id, nextStatus);
+    // 用户「通过」候选素材 -> 待发布，并自动生成 AI 文案。
+    if (asset.status === "CANDIDATE" && nextStatus === "SELECTED") {
+      void api.generateCopy(asset.id).catch(() => {});
+    }
+  };
 
   const handleDelete = async () => {
     if (confirm(`确定删除视频 #${asset.id}？本地文件与封面将一并删除。`)) {
@@ -207,7 +216,7 @@ export function DetailPanel() {
             )}
             {(analysis.has_foreign_language || analysis.has_large_amount_english_subtitle) && (
               <p className="text-xs text-bad">
-                ⚠ 判定为英文内容（对白占比高 / 大量英文字幕），已按规则标记低优先级或跳过。
+                ⚠ 判定为英文内容（对白占比高 / 大量英文字幕），已按规则标记为淘汰。
               </p>
             )}
           </div>
@@ -270,8 +279,9 @@ export function DetailPanel() {
         </button>
         {statusActionLabel && nextStatus && (
           <button
-            onClick={() => void updateStatus(asset.id, nextStatus)}
+            onClick={() => void handleStatusAction()}
             className="h-9 rounded border border-accent bg-accent/10 px-3 text-sm text-accent hover:bg-accent/20"
+            title={asset.status === "CANDIDATE" ? "标记为待发布并自动生成 AI 文案" : undefined}
           >
             {statusActionLabel}
           </button>

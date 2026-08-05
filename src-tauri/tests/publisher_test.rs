@@ -1,4 +1,4 @@
-//! Publisher Agent 集成测试：用假 sidecar 验证「自动检测选文件 -> 自动填表 ->
+﻿//! Publisher Agent 集成测试：用假 sidecar 验证「自动检测选文件 -> 自动填表 ->
 //! 人工确认发布」的完整人机协作状态流。
 use std::path::{Path, PathBuf};
 
@@ -60,8 +60,8 @@ fn setup() -> TestEnv {
         .update_status(asset_id, AssetStatus::Analyzing)
         .expect("analyzing");
     assets
-        .update_status(asset_id, AssetStatus::Ready)
-        .expect("ready");
+        .update_status(asset_id, AssetStatus::Candidate)
+        .expect("CANDIDATE");
     assets
         .update_status(asset_id, AssetStatus::Selected)
         .expect("selected");

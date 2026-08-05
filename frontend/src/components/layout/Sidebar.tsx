@@ -4,11 +4,10 @@ import { statusMeta } from "../../lib/format";
 const STATUS_ORDER = [
   "NEW",
   "ANALYZING",
-  "READY",
+  "CANDIDATE",
   "SELECTED",
   "PUBLISHED",
-  "LOW_PRIORITY",
-  "SKIPPED",
+  "ELIMINATED",
   "DOWNLOAD_FAILED",
 ];
 
@@ -23,33 +22,6 @@ export function Sidebar() {
   return (
     <aside className="w-56 shrink-0 overflow-y-auto border-r border-line bg-panel/60 p-3">
       <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-mute">
-        分类
-      </div>
-      <button
-        onClick={() => void setFilter({ category: undefined })}
-        className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
-          filter.category === undefined
-            ? "bg-accent/15 text-accent"
-            : "text-paper/80 hover:bg-white/5"
-        }`}
-      >
-        <span>全部视频</span>
-        <span className="tabular-nums text-mute">{overview?.total ?? 0}</span>
-      </button>
-      {(overview?.categories ?? []).map((c) => (
-        <button
-          key={c.name}
-          onClick={() => void setFilter({ category: c.name })}
-          className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
-            categoryActive(c.name) ? "bg-accent/15 text-accent" : "text-paper/80 hover:bg-white/5"
-          }`}
-        >
-          <span className="truncate">{c.name}</span>
-          <span className="tabular-nums text-mute">{c.count}</span>
-        </button>
-      ))}
-
-      <div className="mb-1 mt-5 px-2 text-[11px] font-semibold uppercase tracking-wider text-mute">
         状态
       </div>
       <button
@@ -79,6 +51,33 @@ export function Sidebar() {
           </button>
         );
       })}
+
+      <div className="mb-1 mt-5 px-2 text-[11px] font-semibold uppercase tracking-wider text-mute">
+        分类
+      </div>
+      <button
+        onClick={() => void setFilter({ category: undefined })}
+        className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
+          filter.category === undefined
+            ? "bg-accent/15 text-accent"
+            : "text-paper/80 hover:bg-white/5"
+        }`}
+      >
+        <span>全部视频</span>
+        <span className="tabular-nums text-mute">{overview?.total ?? 0}</span>
+      </button>
+      {(overview?.categories ?? []).map((c) => (
+        <button
+          key={c.name}
+          onClick={() => void setFilter({ category: c.name })}
+          className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
+            categoryActive(c.name) ? "bg-accent/15 text-accent" : "text-paper/80 hover:bg-white/5"
+          }`}
+        >
+          <span className="truncate">{c.name}</span>
+          <span className="tabular-nums text-mute">{c.count}</span>
+        </button>
+      ))}
     </aside>
   );
 }

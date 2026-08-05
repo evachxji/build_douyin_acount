@@ -47,7 +47,7 @@ pub fn recommend(db: &crate::db::Database, style: &str) -> Result<serde_json::Va
     let assets = AssetsRepo::new(db);
     // READY 且已分析的素材
     let rows = assets.list(crate::db::repos::assets::AssetFilter {
-        status: Some(AssetStatus::Ready),
+        status: Some(AssetStatus::Candidate),
         ..Default::default()
     })?;
     let analyses = AnalysesRepo::new(db);

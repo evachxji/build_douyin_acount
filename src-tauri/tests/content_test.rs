@@ -1,4 +1,4 @@
-//! Content Agent + 推荐器测试：假 LLM 生成文案、打分推荐写库并入队文案生成。
+﻿//! Content Agent + 推荐器测试：假 LLM 生成文案、打分推荐写库并入队文案生成。
 use std::sync::Arc;
 
 use build_douyin_acount_lib::agents::content::{ContentAgent, CopyGenerator};
@@ -54,7 +54,7 @@ fn insert_asset(db: &Database, title: &str, author: &str, likes: i64) -> i64 {
         })
         .expect("insert");
     repo.update_status(id, AssetStatus::Analyzing).expect("analyzing");
-    repo.update_status(id, AssetStatus::Ready).expect("ready");
+    repo.update_status(id, AssetStatus::Candidate).expect("CANDIDATE");
     id
 }
 

@@ -3,16 +3,22 @@ use serde::{Deserialize, Serialize};
 use super::error::DomainError;
 
 /// 视频资产生命周期状态。
+///
+/// NEW（待处理）-> 采集入库；
+/// ANALYZING（分析中）-> AI 打分中；
+/// CANDIDATE（候选）-> 质量合格待人工挑选；
+/// ELIMINATED（淘汰）-> 质量不佳/不适合，统一淘汰；
+/// SELECTED（待发布）-> 用户「通过」后等待发布；
+/// PUBLISHED（已发布）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AssetStatus {
     New,
     Analyzing,
-    Ready,
+    Candidate,
     Selected,
     Published,
-    Skipped,
-    LowPriority,
+    Eliminated,
     DownloadFailed,
 }
 
@@ -22,14 +28,13 @@ impl AssetStatus {
     pub fn can_transition_to(&self, to: &AssetStatus) -> bool {
         use AssetStatus::*;
         match (self, to) {
-            (New, Analyzing | Skipped | DownloadFailed) => true,
-            (Analyzing, New | Ready | Skipped | LowPriority | DownloadFailed) => true,
-            (Ready, Analyzing | Selected | Skipped | LowPriority) => true,
-            (Selected, Ready | Published | Skipped) => true,
-            (Published, Ready) => true,
-            (Skipped, New | Ready | Analyzing) => true,
-            (LowPriority, Ready | Skipped | Analyzing) => true,
-            (DownloadFailed, New | Skipped) => true,
+            (New, Analyzing | Eliminated | DownloadFailed) => true,
+            (Analyzing, New | Candidate | Eliminated | DownloadFailed) => true,
+            (Candidate, Analyzing | Selected | Eliminated) => true,
+            (Selected, Candidate | Published | Eliminated) => true,
+            (Published, Candidate) => true,
+            (Eliminated, New | Candidate | Analyzing) => true,
+            (DownloadFailed, New | Eliminated) => true,
             _ => false,
         }
     }
@@ -52,11 +57,10 @@ impl std::fmt::Display for AssetStatus {
         let s = match self {
             AssetStatus::New => "NEW",
             AssetStatus::Analyzing => "ANALYZING",
-            AssetStatus::Ready => "READY",
+            AssetStatus::Candidate => "CANDIDATE",
             AssetStatus::Selected => "SELECTED",
             AssetStatus::Published => "PUBLISHED",
-            AssetStatus::Skipped => "SKIPPED",
-            AssetStatus::LowPriority => "LOW_PRIORITY",
+            AssetStatus::Eliminated => "ELIMINATED",
             AssetStatus::DownloadFailed => "DOWNLOAD_FAILED",
         };
         write!(f, "{s}")
@@ -70,11 +74,10 @@ impl std::str::FromStr for AssetStatus {
         match s {
             "NEW" => Ok(AssetStatus::New),
             "ANALYZING" => Ok(AssetStatus::Analyzing),
-            "READY" => Ok(AssetStatus::Ready),
+            "CANDIDATE" => Ok(AssetStatus::Candidate),
             "SELECTED" => Ok(AssetStatus::Selected),
             "PUBLISHED" => Ok(AssetStatus::Published),
-            "SKIPPED" => Ok(AssetStatus::Skipped),
-            "LOW_PRIORITY" => Ok(AssetStatus::LowPriority),
+            "ELIMINATED" => Ok(AssetStatus::Eliminated),
             "DOWNLOAD_FAILED" => Ok(AssetStatus::DownloadFailed),
             other => Err(DomainError::InvalidData(format!("unknown asset status: {other}"))),
         }

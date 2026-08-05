@@ -57,7 +57,7 @@ export function RecommendationDialog({
           {loading && <p className="text-sm text-mute">计算中…</p>}
           {error && <p className="text-sm text-bad">{error}</p>}
           {!loading && !error && data?.groups.length === 0 && (
-            <p className="text-sm text-mute">暂无 READY 素材，先采集并完成 AI 分析。</p>
+            <p className="text-sm text-mute">暂无候选素材，先采集并完成 AI 分析。</p>
           )}
           <div className="space-y-5">
             {data?.groups.map((g) => (

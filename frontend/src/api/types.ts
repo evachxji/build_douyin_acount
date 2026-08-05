@@ -1,11 +1,10 @@
 export type AssetStatus =
   | "NEW"
   | "ANALYZING"
-  | "READY"
+  | "CANDIDATE"
   | "SELECTED"
   | "PUBLISHED"
-  | "SKIPPED"
-  | "LOW_PRIORITY"
+  | "ELIMINATED"
   | "DOWNLOAD_FAILED";
 
 export type TaskStatus =

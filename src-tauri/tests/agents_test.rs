@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+﻿use std::path::PathBuf;
 use std::sync::Arc;
 
 use build_douyin_acount_lib::agents::filter::{english_word_ratio, FilterAgent, FilterRules};
@@ -254,7 +254,7 @@ fn vision_agent_analyzes_asset_and_marks_ready() {
     assert_eq!(analysis.category.as_deref(), Some("宠物"));
     assert_eq!(analysis.quality_score, Some(88));
     let asset = AssetsRepo::new(&db).get(asset_id).expect("get").expect("some");
-    assert_eq!(asset.status, AssetStatus::Ready);
+    assert_eq!(asset.status, AssetStatus::Candidate);
 }
 
 #[test]
@@ -303,5 +303,5 @@ fn filter_agent_standalone_updates_status_from_db() {
     };
     agent.run(&ctx, task).expect("run");
     let asset = AssetsRepo::new(&db).get(asset_id).expect("get").expect("some");
-    assert_eq!(asset.status, AssetStatus::Skipped);
+    assert_eq!(asset.status, AssetStatus::Eliminated);
 }

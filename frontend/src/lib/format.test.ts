@@ -20,8 +20,10 @@ describe("formatCount", () => {
 
 describe("statusMeta", () => {
   it("maps every asset status to a display label", () => {
-    expect(statusMeta("READY").label).toBe("可发布");
-    expect(statusMeta("LOW_PRIORITY").label).toBe("低优先级");
+    expect(statusMeta("NEW").label).toBe("待处理");
+    expect(statusMeta("CANDIDATE").label).toBe("候选");
+    expect(statusMeta("ELIMINATED").label).toBe("淘汰");
+    expect(statusMeta("SELECTED").label).toBe("待发布");
     expect(statusMeta("WAITING_FOR_HUMAN").label).toBe("待人工确认");
   });
 });

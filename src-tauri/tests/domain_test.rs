@@ -3,25 +3,27 @@ use build_douyin_acount_lib::domain::task::TaskStatus;
 
 #[test]
 fn asset_status_allows_documented_transitions() {
-    // NEW -> ANALYZING / SKIPPED / DOWNLOAD_FAILED
+    // NEW（待处理）-> ANALYZING / ELIMINATED / DOWNLOAD_FAILED
     assert!(AssetStatus::New.can_transition_to(&AssetStatus::Analyzing));
-    assert!(AssetStatus::New.can_transition_to(&AssetStatus::Skipped));
+    assert!(AssetStatus::New.can_transition_to(&AssetStatus::Eliminated));
     assert!(AssetStatus::New.can_transition_to(&AssetStatus::DownloadFailed));
-    // ANALYZING -> READY / LOW_PRIORITY / NEW(重试)
-    assert!(AssetStatus::Analyzing.can_transition_to(&AssetStatus::Ready));
-    assert!(AssetStatus::Analyzing.can_transition_to(&AssetStatus::LowPriority));
+    // ANALYZING -> CANDIDATE / ELIMINATED / NEW(重试)
+    assert!(AssetStatus::Analyzing.can_transition_to(&AssetStatus::Candidate));
+    assert!(AssetStatus::Analyzing.can_transition_to(&AssetStatus::Eliminated));
     assert!(AssetStatus::Analyzing.can_transition_to(&AssetStatus::New));
-    // READY -> SELECTED / ANALYZING(重分析) / SKIPPED
-    assert!(AssetStatus::Ready.can_transition_to(&AssetStatus::Selected));
-    assert!(AssetStatus::Ready.can_transition_to(&AssetStatus::Analyzing));
-    // SELECTED -> PUBLISHED / READY(取消选择)
+    // CANDIDATE（候选）-> SELECTED / ANALYZING(重分析) / ELIMINATED
+    assert!(AssetStatus::Candidate.can_transition_to(&AssetStatus::Selected));
+    assert!(AssetStatus::Candidate.can_transition_to(&AssetStatus::Analyzing));
+    assert!(AssetStatus::Candidate.can_transition_to(&AssetStatus::Eliminated));
+    // SELECTED（待发布）-> PUBLISHED / CANDIDATE(取消选择) / ELIMINATED(放弃)
     assert!(AssetStatus::Selected.can_transition_to(&AssetStatus::Published));
-    assert!(AssetStatus::Selected.can_transition_to(&AssetStatus::Ready));
-    // PUBLISHED -> READY(纠错)
-    assert!(AssetStatus::Published.can_transition_to(&AssetStatus::Ready));
-    // SKIPPED / LOW_PRIORITY 可恢复
-    assert!(AssetStatus::Skipped.can_transition_to(&AssetStatus::Ready));
-    assert!(AssetStatus::LowPriority.can_transition_to(&AssetStatus::Ready));
+    assert!(AssetStatus::Selected.can_transition_to(&AssetStatus::Candidate));
+    // PUBLISHED -> CANDIDATE(纠错)
+    assert!(AssetStatus::Published.can_transition_to(&AssetStatus::Candidate));
+    // ELIMINATED（淘汰）可恢复
+    assert!(AssetStatus::Eliminated.can_transition_to(&AssetStatus::Candidate));
+    assert!(AssetStatus::Eliminated.can_transition_to(&AssetStatus::New));
+    assert!(AssetStatus::Eliminated.can_transition_to(&AssetStatus::Analyzing));
     // DOWNLOAD_FAILED -> NEW 重试
     assert!(AssetStatus::DownloadFailed.can_transition_to(&AssetStatus::New));
 }
@@ -29,7 +31,7 @@ fn asset_status_allows_documented_transitions() {
 #[test]
 fn asset_status_rejects_illegal_transitions() {
     assert!(!AssetStatus::New.can_transition_to(&AssetStatus::Published));
-    assert!(!AssetStatus::New.can_transition_to(&AssetStatus::Ready));
+    assert!(!AssetStatus::New.can_transition_to(&AssetStatus::Candidate));
     assert!(!AssetStatus::Published.can_transition_to(&AssetStatus::Selected));
     assert!(!AssetStatus::DownloadFailed.can_transition_to(&AssetStatus::Published));
 }
@@ -54,16 +56,15 @@ fn task_status_rejects_illegal_transitions() {
 
 #[test]
 fn asset_status_serde_roundtrip_matches_database_strings() {
-    // 序列化结果必须与 DB/Display 字符串一致（LOW_PRIORITY / DOWNLOAD_FAILED 带下划线），
+    // 序列化结果必须与 DB/Display 字符串一致（ELIMINATED / DOWNLOAD_FAILED 带下划线），
     // 否则前端状态徽章与筛选会拿到 LOWPRIORITY 之类的裸值。
     let cases: &[(AssetStatus, &str)] = &[
         (AssetStatus::New, "NEW"),
         (AssetStatus::Analyzing, "ANALYZING"),
-        (AssetStatus::Ready, "READY"),
+        (AssetStatus::Candidate, "CANDIDATE"),
         (AssetStatus::Selected, "SELECTED"),
         (AssetStatus::Published, "PUBLISHED"),
-        (AssetStatus::Skipped, "SKIPPED"),
-        (AssetStatus::LowPriority, "LOW_PRIORITY"),
+        (AssetStatus::Eliminated, "ELIMINATED"),
         (AssetStatus::DownloadFailed, "DOWNLOAD_FAILED"),
     ];
     for (status, expected) in cases {
