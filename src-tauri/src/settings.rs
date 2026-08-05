@@ -22,6 +22,8 @@ pub struct AppSettings {
     /// 采集 sidecar 与 yt-dlp 路径。
     pub collector_script: String,
     pub ytdlp_path: String,
+    /// 默认账号文案风格（搞笑/治愈/高级感/情绪价值）。
+    pub account_style: String,
     /// 采集配额（均可配置）：每轮条数、平台比例、点赞上限。
     pub batch_size: i64,
     pub tiktok_ratio: f64,
@@ -45,6 +47,7 @@ impl Default for AppSettings {
             publisher_browser: "chrome".to_string(),
             collector_script: "scripts/collector/collect.js".to_string(),
             ytdlp_path: "yt-dlp".to_string(),
+            account_style: "治愈".to_string(),
             batch_size: 20,
             tiktok_ratio: 0.3,
             instagram_ratio: 0.7,

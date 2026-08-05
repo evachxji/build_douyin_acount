@@ -111,6 +111,7 @@ export interface AppSettings {
   publisher_browser: string;
   collector_script: string;
   ytdlp_path: string;
+  account_style: string;
   batch_size: number;
   tiktok_ratio: number;
   instagram_ratio: number;
@@ -134,6 +135,37 @@ export interface PublishDraft {
 export interface PreparePublishResult {
   draft: PublishDraft;
   task_id: number;
+}
+
+export interface ContentCopy {
+  id: number;
+  asset_id: number;
+  style_id: number | null;
+  title: string;
+  body: string;
+  hashtags: string[];
+  created_at: string;
+}
+
+export interface RecommendationItem {
+  asset_id: number;
+  title: string | null;
+  author: string | null;
+  likes: number;
+  quality_score: number | null;
+  score: number;
+  category: string;
+  reason: string | null;
+}
+
+export interface RecommendationGroup {
+  category: string;
+  items: RecommendationItem[];
+}
+
+export interface RecommendationResult {
+  batch_id: string;
+  groups: RecommendationGroup[];
 }
 
 export interface AssetListFilterArg {

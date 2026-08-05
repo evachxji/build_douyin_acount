@@ -20,6 +20,7 @@ fn settings_defaults_when_nothing_stored() {
     assert_eq!(settings.publisher_browser, "chrome");
     assert_eq!(settings.collector_script, "scripts/collector/collect.js");
     assert_eq!(settings.ytdlp_path, "yt-dlp");
+    assert_eq!(settings.account_style, "治愈");
     assert_eq!(settings.batch_size, 20);
     assert_eq!(settings.tiktok_ratio, 0.3);
     assert_eq!(settings.instagram_ratio, 0.7);
@@ -44,6 +45,7 @@ fn settings_roundtrip_persists_fields() {
         publisher_browser: "chromium".to_string(),
         collector_script: "scripts/dev-collect.js".to_string(),
         ytdlp_path: "yt-dlp-dev".to_string(),
+        account_style: "搞笑".to_string(),
         batch_size: 30,
         tiktok_ratio: 0.4,
         instagram_ratio: 0.6,

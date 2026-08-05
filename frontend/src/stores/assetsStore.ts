@@ -13,6 +13,7 @@ interface AssetsState {
   setFilter: (patch: Partial<FilterState>) => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
   removeAsset: (id: number) => Promise<void>;
+  removeMany: (ids: number[]) => Promise<void>;
   updateStatus: (id: number, to: string) => Promise<void>;
   importFiles: (paths: string[]) => Promise<void>;
   analyzeSelected: (ids: number[]) => Promise<number>;
@@ -52,6 +53,11 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   removeAsset: async (id) => {
     await api.deleteAsset(id);
+    await get().load();
+  },
+
+  removeMany: async (ids) => {
+    await Promise.all(ids.map((id) => api.deleteAsset(id)));
     await get().load();
   },
 

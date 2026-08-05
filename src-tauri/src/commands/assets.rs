@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tauri::State;
 
@@ -6,7 +6,7 @@ use crate::db::repos::analyses::AnalysesRepo;
 use crate::db::repos::assets::{AssetFilter, AssetsRepo};
 use crate::domain::analysis::AnalysisResult;
 use crate::domain::asset::{AssetStatus, VideoAsset};
-use crate::domain::error::ApiError;
+use crate::domain::error::{ApiError, DomainError};
 use crate::media::{ImportOptions, VideoManager};
 use crate::state::AppState;
 
@@ -124,6 +124,33 @@ pub fn import_videos(
         }
     }
     Ok(imported)
+}
+
+/// 在系统文件管理器中定位并选中视频文件（Windows 资源管理器 /select）。
+#[tauri::command]
+pub fn reveal_in_folder(path: String) -> Result<(), ApiError> {
+    reveal_in_folder_impl(&path).map_err(ApiError::from)
+}
+
+fn reveal_in_folder_impl(path: &str) -> Result<(), DomainError> {
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Err(DomainError::InvalidData(format!(
+            "file not found: {}",
+            path.display()
+        )));
+    }
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .spawn()?;
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg("-R").arg(&path).spawn()?;
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    std::process::Command::new("xdg-open")
+        .arg(path.parent().unwrap_or(path.as_path()))
+        .spawn()?;
+    Ok(())
 }
 
 #[derive(Debug, serde::Serialize)]

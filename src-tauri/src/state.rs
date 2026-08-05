@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::agents::filter::FilterRules;
 use crate::agents::collector::CollectorAgent;
+use crate::agents::content::{ContentAgent, OllamaCopyGenerator};
 use crate::agents::runtime::AgentRuntime;
 use crate::agents::vision::VisionAgent;
 use crate::analysis::asr::WhisperAsr;
@@ -101,6 +102,14 @@ impl AppState {
             script,
         )));
         runtime.register(Box::new(CollectorAgent::new(node_bin, collector_script, ytdlp)));
+        let (ollama_url, llm_model) = {
+            let s = self.settings.read().expect("settings lock poisoned");
+            (s.ollama_url.clone(), s.llm_model.clone())
+        };
+        runtime.register(Box::new(ContentAgent::new(Arc::new(OllamaCopyGenerator {
+            client: AiClient::new(ollama_url)?,
+            model: llm_model,
+        }))));
         Ok(runtime)
     }
 }

@@ -98,6 +98,16 @@ CREATE TABLE IF NOT EXISTS recommendations (
 );
 CREATE INDEX IF NOT EXISTS idx_recommendations_batch ON recommendations(batch_id);
 
+CREATE TABLE IF NOT EXISTS content_copies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER NOT NULL UNIQUE REFERENCES video_assets(id) ON DELETE CASCADE,
+  style_id INTEGER REFERENCES account_styles(id),
+  title TEXT,
+  body TEXT,
+  hashtags_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,

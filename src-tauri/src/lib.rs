@@ -71,9 +71,13 @@ pub fn run() {
             commands::assets::delete_asset,
             commands::assets::update_asset_status,
             commands::assets::import_videos,
+            commands::assets::reveal_in_folder,
             commands::assets::library_overview,
             commands::analysis::analyze_assets,
             commands::collection::start_collection,
+            commands::content::generate_copy,
+            commands::content::get_copy,
+            commands::content::get_recommendations,
             commands::publish::prepare_publish,
             commands::publish::list_drafts,
             commands::publish::publish_confirmed,
@@ -97,7 +101,7 @@ pub fn run() {
                     }
                 }
             });
-            // 后台 worker：publisher / collector 任务（独立线程，避免阻塞 vision 队列）。
+            // 后台 worker：publisher / collector / content 任务（独立线程，避免阻塞 vision 队列）。
             let handle_pub = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -108,6 +112,9 @@ pub fn run() {
                     }
                     if let Err(e) = runtime.run_once("collector") {
                         tracing::warn!("collector worker error: {e}");
+                    }
+                    if let Err(e) = runtime.run_once("content") {
+                        tracing::warn!("content worker error: {e}");
                     }
                 }
             });

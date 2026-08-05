@@ -8,6 +8,7 @@ interface SelectionState {
   focusId: number | null;
   focus: (id: number) => void;
   toggle: (id: number) => void;
+  replace: (ids: number[]) => void;
   clear: () => void;
 }
 
@@ -17,5 +18,6 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   focus: (id) => set({ ids: new Set([id]), focusId: id }),
   toggle: (id) =>
     set((s) => ({ ids: selectionReducer(s.ids, { type: "toggle", id }) })),
+  replace: (ids) => set({ ids: new Set(ids) }),
   clear: () => set({ ids: new Set() }),
 }));

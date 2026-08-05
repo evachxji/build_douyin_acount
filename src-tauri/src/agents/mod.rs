@@ -1,5 +1,6 @@
 pub mod filter;
 pub mod collector;
+pub mod content;
 pub mod publisher;
 pub mod runtime;
 pub mod vision;

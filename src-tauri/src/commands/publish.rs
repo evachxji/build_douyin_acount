@@ -32,6 +32,28 @@ pub fn prepare_publish(
         .into());
     }
 
+    // 优先使用已生成的风格化文案（标题/正文/话题完整）。
+    if let Some(copy) = crate::db::repos::content::ContentRepo::new(db).get_by_asset(asset_id)? {
+        let drafts = DraftsRepo::new(db);
+        let draft_id = drafts.create(NewDraft {
+            asset_id,
+            style_id: copy.style_id,
+            title: Some(copy.title),
+            body: Some(copy.body),
+            hashtags: copy.hashtags,
+        })?;
+        let task_id = TasksRepo::new(db).enqueue(
+            "publisher",
+            "prepare_publish",
+            json!({ "draft_id": draft_id, "asset_id": asset_id }),
+            true,
+        )?;
+        let draft = drafts
+            .get(draft_id)?
+            .ok_or(DomainError::InvalidData("draft disappeared".to_string()))?;
+        return Ok(json!({ "draft": draft, "task_id": task_id }));
+    }
+
     let analysis = AnalysesRepo::new(db).get_by_asset(asset_id)?;
     let caption = analysis
         .as_ref()

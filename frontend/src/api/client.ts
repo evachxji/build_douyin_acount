@@ -4,9 +4,11 @@ import type {
   AnalysisResult,
   AppSettings,
   AssetListFilterArg,
+  ContentCopy,
   LibraryOverview,
   PreparePublishResult,
   PublishDraft,
+  RecommendationResult,
   TaskLog,
   VideoAsset,
 } from "./types";
@@ -54,6 +56,7 @@ export const api = {
     call<void>("update_asset_status", { id, to }),
   importVideos: (paths: string[], platform?: string) =>
     call<VideoAsset[]>("import_videos", { paths, platform: platform ?? null }),
+  revealInFolder: (path: string) => call<void>("reveal_in_folder", { path }),
   libraryOverview: () => call<LibraryOverview>("library_overview"),
   analyzeAssets: (ids: number[]) => call<number[]>("analyze_assets", { ids }),
   listTasks: (status?: string) =>
@@ -73,4 +76,7 @@ export const api = {
   copyText: (text: string) => call<void>("copy_to_clipboard", { text }),
   startCollection: () =>
     call<{ platform: string; count: number; task_id: number }[]>("start_collection"),
+  generateCopy: (assetId: number) => call<number>("generate_copy", { assetId }),
+  getCopy: (assetId: number) => call<ContentCopy | null>("get_copy", { assetId }),
+  getRecommendations: () => call<RecommendationResult>("get_recommendations"),
 };

@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+import { api } from "../api/client";
 import type { VideoAsset } from "../api/types";
 import { coverUrl } from "../api/urls";
 import { formatCount, formatDuration, platformLabel } from "../lib/format";
@@ -14,9 +16,55 @@ interface Props {
 
 export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props) {
   const cover = coverUrl(asset.cover_path);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => {
+      if (e.type === "mousedown" && menuRef.current?.contains(e.target as Node)) return;
+      setMenu(null);
+    };
+    const closeAll = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("contextmenu", closeAll, true);
+    window.addEventListener("blur", closeAll);
+    window.addEventListener("resize", closeAll);
+    window.addEventListener("scroll", closeAll, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("contextmenu", closeAll, true);
+      window.removeEventListener("blur", closeAll);
+      window.removeEventListener("resize", closeAll);
+      window.removeEventListener("scroll", closeAll, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  const handleOpenPath = async () => {
+    setMenu(null);
+    try {
+      await api.revealInFolder(asset.file_path);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <article
-      onClick={onFocus}
+      data-asset-id={asset.id}
+      onClick={(e) => {
+        if (e.ctrlKey || e.metaKey) onToggle();
+        else onFocus();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
       className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-panel transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/40 ${
         focused ? "border-accent/70" : selected ? "border-accent/50" : "border-line hover:border-accent/40"
       }`}
@@ -94,6 +142,25 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
       >
         选
       </button>
+
+      {menu && (
+        <div
+          ref={menuRef}
+          onContextMenu={(e) => e.preventDefault()}
+          className="fixed z-50 w-36 rounded-lg border border-line bg-panel p-1 shadow-2xl shadow-black/50"
+          style={{
+            left: Math.min(menu.x, window.innerWidth - 150),
+            top: Math.min(menu.y, window.innerHeight - 72),
+          }}
+        >
+          <button
+            onClick={() => void handleOpenPath()}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-paper/90 transition-colors hover:bg-accent/15 hover:text-accent"
+          >
+            📁 打开路径
+          </button>
+        </div>
+      )}
     </article>
   );
 }

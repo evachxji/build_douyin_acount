@@ -5,7 +5,13 @@ import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useTaskStore } from "../../stores/taskStore";
 
-export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function TopBar({
+  onOpenSettings,
+  onOpenRecommendations,
+}: {
+  onOpenSettings: () => void;
+  onOpenRecommendations: () => void;
+}) {
   const filter = useAssetsStore((s) => s.filter);
   const setFilter = useAssetsStore((s) => s.setFilter);
   const importFiles = useAssetsStore((s) => s.importFiles);
@@ -119,6 +125,13 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         title="按设置配额刷 TikTok / Instagram 推荐流采集并下载"
       >
         开始采集
+      </button>
+      <button
+        onClick={onOpenRecommendations}
+        className="h-9 rounded border border-line px-3 text-sm text-paper hover:border-accent/50 hover:bg-accent/10"
+        title="查看各分类推荐素材并勾选发布"
+      >
+        推荐清单
       </button>
       <button
         onClick={() => void handleAnalyze()}

@@ -7,7 +7,7 @@ import { ScoreBadge } from "../ScoreBadge";
 import { StatusBadge } from "../StatusBadge";
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
-import type { AnalysisResult } from "../../api/types";
+import type { AnalysisResult, ContentCopy } from "../../api/types";
 
 export function DetailPanel() {
   const focusId = useSelectionStore((s) => s.focusId);
@@ -18,7 +18,9 @@ export function DetailPanel() {
   const analyzeSelected = useAssetsStore((s) => s.analyzeSelected);
   const setTaskOpen = useTaskStore((s) => s.setOpen);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [copy, setCopy] = useState<ContentCopy | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [publishing, setPublishing] = useState(false);
 
   const asset = assets.find((a) => a.id === focusId) ?? null;
@@ -26,11 +28,35 @@ export function DetailPanel() {
   useEffect(() => {
     if (!asset) {
       setAnalysis(null);
+      setCopy(null);
       return;
     }
     setAnalysis(null);
+    setCopy(null);
     void api.getAnalysis(asset.id).then(setAnalysis).catch(() => setAnalysis(null));
+    void api.getCopy(asset.id).then(setCopy).catch(() => setCopy(null));
   }, [asset?.id, asset]);
+
+  const handleGenerateCopy = async () => {
+    if (!asset) return;
+    setCopying(true);
+    try {
+      await api.generateCopy(asset.id);
+      // 文案由后台 LLM 生成，轮询等待结果（最长 60 秒）。
+      for (let i = 0; i < 20; i += 1) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const c = await api.getCopy(asset.id).catch(() => null);
+        if (c) {
+          setCopy(c);
+          break;
+        }
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCopying(false);
+    }
+  };
 
   if (!asset) {
     return (
@@ -65,6 +91,14 @@ export function DetailPanel() {
   const handleDelete = async () => {
     if (confirm(`确定删除视频 #${asset.id}？本地文件与封面将一并删除。`)) {
       await removeAsset(asset.id);
+    }
+  };
+
+  const handleReveal = async () => {
+    try {
+      await api.revealInFolder(asset.file_path);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -120,6 +154,14 @@ export function DetailPanel() {
             ♥ {formatCount(asset.likes)} · {formatCount(asset.comments)} 评 ·{" "}
             {formatCount(asset.plays)} 播
           </span>
+          <button
+            onClick={() => void handleReveal()}
+            className="ml-auto rounded border border-line px-1.5 py-0.5 text-mute transition-colors hover:border-accent/50 hover:text-paper"
+            title="在资源管理器中查看视频位置"
+            aria-label="在资源管理器中查看视频位置"
+          >
+            📁
+          </button>
         </div>
       </div>
 
@@ -171,6 +213,36 @@ export function DetailPanel() {
             {asset.status === "ANALYZING"
               ? "正在分析中，完成后自动刷新…"
               : "尚未分析，点击「AI 分析」排队处理。"}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 border-t border-line px-4 py-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-mute">
+            AI 文案
+          </span>
+          <button
+            onClick={() => void handleGenerateCopy()}
+            disabled={copying || !analysis}
+            className="rounded border border-line px-2 py-0.5 text-[11px] text-mute hover:border-accent/50 hover:text-paper disabled:opacity-40"
+          >
+            {copying ? "生成中…" : "生成文案"}
+          </button>
+        </div>
+        {copy ? (
+          <div className="mt-2 space-y-2 text-sm">
+            <p className="text-[13px] font-medium text-paper/90">{copy.title}</p>
+            {copy.body && <p className="text-[13px] leading-relaxed text-paper/75">{copy.body}</p>}
+            {copy.hashtags.length > 0 && (
+              <p className="text-xs text-accent">
+                {copy.hashtags.map((h) => `#${h}`).join(" ")}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-mute">
+            按设置中的账号风格生成抖音标题/正文/话题。
           </p>
         )}
       </div>

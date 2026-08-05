@@ -16,6 +16,7 @@ const EMPTY: AppSettings = {
   publisher_browser: "chrome",
   collector_script: "",
   ytdlp_path: "yt-dlp",
+  account_style: "治愈",
   batch_size: 20,
   tiktok_ratio: 0.3,
   instagram_ratio: 0.7,
@@ -155,6 +156,20 @@ export function SettingsDrawer({
           <label className="block">
             <span className="text-xs text-mute">yt-dlp 路径</span>
             <input className={field} value={settings.ytdlp_path} onChange={(e) => set({ ytdlp_path: e.target.value })} />
+          </label>
+          <label className="block">
+            <span className="text-xs text-mute">默认文案风格</span>
+            <select
+              className={field}
+              value={settings.account_style}
+              onChange={(e) => set({ account_style: e.target.value })}
+            >
+              {["搞笑", "治愈", "高级感", "情绪价值"].map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
           </label>
           <p className="text-[11px] leading-relaxed text-mute">
             采集配额与 yt-dlp 路径保存后，下一次采集立即生效。
