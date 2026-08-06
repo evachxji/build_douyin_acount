@@ -53,6 +53,7 @@ fn category_counts_groups_by_analysis_category() {
         frame_paths: Vec::new(),
         model_name: None,
         prompt_version: None,
+        condition_results: vec![],
     };
     analyses.upsert(analysis.clone()).expect("upsert pet");
     analysis.asset_id = food;

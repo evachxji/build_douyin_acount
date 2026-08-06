@@ -74,6 +74,7 @@ fn attach_analysis(db: &Database, asset_id: i64, category: &str, quality: i64) {
             frame_paths: Vec::new(),
             model_name: Some("test".to_string()),
             prompt_version: Some("t".to_string()),
+            condition_results: vec![],
         })
         .expect("analysis");
 }

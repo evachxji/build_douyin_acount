@@ -17,6 +17,8 @@ pub struct AnalysisResult {
     pub frame_paths: Vec<String>,
     pub model_name: Option<String>,
     pub prompt_version: Option<String>,
+    #[serde(default)]
+    pub condition_results: Vec<ConditionVerdict>,
     pub created_at: String,
 }
 
@@ -36,6 +38,16 @@ pub struct NewAnalysis {
     pub frame_paths: Vec<String>,
     pub model_name: Option<String>,
     pub prompt_version: Option<String>,
+    #[serde(default)]
+    pub condition_results: Vec<ConditionVerdict>,
+}
+
+/// 单条筛选条件的 LLM 判定结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConditionVerdict {
+    pub name: String,
+    pub hit: bool,
+    pub basis: String,
 }
 
 /// 英文/质量过滤判定结果。

@@ -27,7 +27,8 @@ fn row_to_analysis(row: &Row<'_>) -> rusqlite::Result<AnalysisResult> {
         frame_paths: serde_json::from_str(&frames).unwrap_or_default(),
         model_name: row.get(12)?,
         prompt_version: row.get(13)?,
-        created_at: row.get(14)?,
+        condition_results: serde_json::from_str(&row.get::<_, String>(14)?).unwrap_or_default(),
+        created_at: row.get(15)?,
     })
 }
 
@@ -41,12 +42,14 @@ impl<'a> AnalysesRepo<'a> {
         let conn = self.db.conn();
         let tags = serde_json::to_string(&input.tags)?;
         let frames = serde_json::to_string(&input.frame_paths)?;
+        let condition_results = serde_json::to_string(&input.condition_results)?;
         conn.execute(
             "INSERT INTO analysis_results
                 (asset_id, category, tags_json, quality_score, has_foreign_language,
                  has_large_amount_english_subtitle, summary, recommended_caption,
-                 asr_text, asr_language, frame_paths_json, model_name, prompt_version)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+                 asr_text, asr_language, frame_paths_json, model_name, prompt_version,
+                 condition_results_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
              ON CONFLICT(asset_id) DO UPDATE SET
                 category = excluded.category,
                 tags_json = excluded.tags_json,
@@ -59,7 +62,8 @@ impl<'a> AnalysesRepo<'a> {
                 asr_language = excluded.asr_language,
                 frame_paths_json = excluded.frame_paths_json,
                 model_name = excluded.model_name,
-                prompt_version = excluded.prompt_version",
+                prompt_version = excluded.prompt_version,
+                condition_results_json = excluded.condition_results_json",
             params![
                 input.asset_id,
                 input.category,
@@ -74,6 +78,7 @@ impl<'a> AnalysesRepo<'a> {
                 frames,
                 input.model_name,
                 input.prompt_version,
+                condition_results,
             ],
         )?;
         let id: i64 = conn.query_row(

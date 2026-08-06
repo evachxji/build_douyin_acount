@@ -124,6 +124,7 @@ impl AnalysisPipeline {
                 .collect(),
             model_name: None,
             prompt_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            condition_results: vec![],
         })
     }
 }

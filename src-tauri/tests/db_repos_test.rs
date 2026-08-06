@@ -2,7 +2,7 @@
 use build_douyin_acount_lib::db::repos::assets::{AssetFilter, AssetsRepo};
 use build_douyin_acount_lib::db::repos::analyses::AnalysesRepo;
 use build_douyin_acount_lib::db::repos::tasks::TasksRepo;
-use build_douyin_acount_lib::domain::analysis::NewAnalysis;
+use build_douyin_acount_lib::domain::analysis::{ConditionVerdict, NewAnalysis};
 use build_douyin_acount_lib::domain::asset::{AssetStatus, NewAsset};
 use build_douyin_acount_lib::domain::task::TaskStatus;
 
@@ -125,6 +125,7 @@ fn asset_list_filters_by_status_and_category() {
         frame_paths: vec![],
         model_name: Some("qwen2.5-vl:7b".to_string()),
         prompt_version: Some("v1".to_string()),
+        condition_results: vec![],
     })
     .expect("analysis");
 
@@ -157,6 +158,7 @@ fn asset_delete_cascades_analysis() {
             frame_paths: vec![],
             model_name: None,
             prompt_version: None,
+            condition_results: vec![],
         })
         .expect("analysis");
     assets.delete(id).expect("delete");
@@ -184,6 +186,7 @@ fn analysis_upsert_updates_existing_row() {
         frame_paths: vec![],
         model_name: None,
         prompt_version: None,
+        condition_results: vec![],
     };
     analyses.upsert(base.clone()).expect("first");
     let second = NewAnalysis {
@@ -193,6 +196,38 @@ fn analysis_upsert_updates_existing_row() {
     analyses.upsert(second).expect("second");
     let row = analyses.get_by_asset(id).expect("get").expect("some");
     assert_eq!(row.quality_score, Some(95));
+}
+
+#[test]
+fn analysis_condition_results_roundtrip() {
+    let db = test_db();
+    let assets = AssetsRepo::new(&db);
+    let analyses = AnalysesRepo::new(&db);
+    let id = assets.insert(sample_asset("cond")).expect("insert");
+    let verdicts = vec![
+        ConditionVerdict { name: "宠物".to_string(), hit: true, basis: "画面".to_string() },
+        ConditionVerdict { name: "长中文对话".to_string(), hit: false, basis: "音频".to_string() },
+    ];
+    analyses
+        .upsert(NewAnalysis {
+            asset_id: id,
+            category: Some("宠物".to_string()),
+            tags: vec![],
+            quality_score: Some(80),
+            has_foreign_language: false,
+            has_large_amount_english_subtitle: false,
+            summary: None,
+            recommended_caption: None,
+            asr_text: None,
+            asr_language: None,
+            frame_paths: vec![],
+            model_name: None,
+            prompt_version: None,
+            condition_results: verdicts.clone(),
+        })
+        .expect("upsert");
+    let row = analyses.get_by_asset(id).expect("get").expect("some");
+    assert_eq!(row.condition_results, verdicts);
 }
 
 #[test]

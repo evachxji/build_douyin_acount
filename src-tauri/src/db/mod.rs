@@ -23,6 +23,7 @@ impl Database {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(migrations::MIGRATIONS)?;
+        ensure_analysis_conditions_column(&conn)?;
         seed_account_styles(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -33,6 +34,20 @@ impl Database {
     pub fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn.lock().expect("db lock poisoned")
     }
+}
+
+/// 旧库升级：analysis_results 缺 condition_results_json 列时补上（幂等，每次启动安全）。
+fn ensure_analysis_conditions_column(conn: &Connection) -> Result<(), DomainError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(analysis_results)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    if !cols.iter().any(|c| c == "condition_results_json") {
+        conn.execute_batch(
+            "ALTER TABLE analysis_results ADD COLUMN condition_results_json TEXT NOT NULL DEFAULT '[]'",
+        )?;
+    }
+    Ok(())
 }
 
 /// 内置账号风格（搞笑/治愈/高级感/情绪价值），缺失时补齐。

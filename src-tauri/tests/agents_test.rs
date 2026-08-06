@@ -40,6 +40,7 @@ fn sample_analysis(asset_id: i64) -> NewAnalysis {
         frame_paths: vec![],
         model_name: Some("m".to_string()),
         prompt_version: Some("v1".to_string()),
+        condition_results: vec![],
     }
 }
 

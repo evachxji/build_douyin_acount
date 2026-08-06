@@ -301,6 +301,7 @@ fn main() {
                     frame_paths: Vec::new(),
                     model_name: Some("seed-mock".to_string()),
                     prompt_version: Some("dev-seed".to_string()),
+                    condition_results: vec![],
                 })
                 .expect("upsert analysis");
         }

@@ -105,6 +105,7 @@ impl Agent for FilterAgent {
             frame_paths: analysis.frame_paths,
             model_name: analysis.model_name,
             prompt_version: analysis.prompt_version,
+            condition_results: analysis.condition_results,
         };
         let verdict = Self::evaluate(&new_analysis, &self.rules)?;
         let status = Self::verdict_status(verdict);

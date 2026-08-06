@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS analysis_results (
   frame_paths_json TEXT NOT NULL DEFAULT '[]',
   model_name TEXT,
   prompt_version TEXT,
+  condition_results_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_analysis_asset ON analysis_results(asset_id);
