@@ -153,25 +153,26 @@ analyze_asset(payload: {asset_id})
 - **缓存**：已分析资产不重复分析；模型、提示词版本记录在结果中。
 - **降级**：音频静音时跳过 ASR；无字幕视频 OCR 直接给"无字幕"。
 
-### 3.4 Filter Agent（质量与英文过滤）
+### 3.4 Filter Agent（质量与自定义条件过滤）
 
-三层判定，结果合并：
+判定顺序：
 
 ```mermaid
 flowchart TD
-    ASR["ASR 文本与语言"] --> D1{"英文对白占比 > 60% ?"}
-    OCR["画面字幕 OCR / Vision 估算"] --> D2{"大段英文字幕 ?"}
-    LLM["LLM 受众判断"] --> D3{"主要面向海外用户 ?"}
-    D1 --> F{综合判定}
-    D2 --> F
-    D3 --> F
-    F -->|是| SKIP["skip_download=true<br/>资产置 SKIPPED / LOW_PRIORITY"]
-    F -->|否| OK["保留，进入 READY"]
+    COND["LLM 逐条判定（画面/音频）"] --> E{"任一排除条件命中?"}
+    E -->|是| EX["淘汰 skip_download<br/>记录排除条件名"]
+    E -->|否| H{"命中条件全部未命中?"}
+    H -->|是| EX
+    H -->|否| Q{"quality_score < 保留线?"}
+    Q -->|是| LOW["低优先级 LOW_PRIORITY"]
+    Q -->|否| KEEP["保留，进入 CANDIDATE"]
 ```
 
-- 判定结果写入 `analysis_results`（`has_foreign_language`、`has_large_amount_english_subtitle`）。
-- `skip_download=true` 的资产**不再参与推荐**；`LOW_PRIORITY` 排最后。
-- 规则阈值集中在 `resources/filter-rules.toml`，可调。
+- 「命中条件 / 排除条件」由用户在设置页配置（空列表 = 不限制），经 `AppSettings` 注入 `FilterRules`；LLM 对每条条件输出 `conditions: [{name, hit, basis}]`，判定依据为画面或音频。
+- 逐条判定结果写入 `analysis_results.condition_results_json`；未配置条件或旧分析无判定数据时，条件层不生效。
+- 内置英文规则（大段英文字幕、英文主导对白）已移除；需要过滤英文内容时，由用户自行加入排除条件。
+- 质量分规则保留：`quality_score < quality_min_keep`（设置可调）→ `LOW_PRIORITY`。
+- 淘汰原因（`excluded_by_condition: xxx` / `no_hit_condition`）写入 vision 任务日志。
 
 ### 3.5 Content Agent（文案生成）
 
