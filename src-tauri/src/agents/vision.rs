@@ -32,7 +32,10 @@ impl Agent for VisionAgent {
         let asset = assets
             .get(asset_id)?
             .ok_or(DomainError::AssetNotFound(asset_id))?;
-        assets.update_status(asset_id, AssetStatus::Analyzing)?;
+        // 逐条导入已把资产置为 ANALYZING，重试时无需（也不允许）重复迁移。
+        if asset.status != AssetStatus::Analyzing {
+            assets.update_status(asset_id, AssetStatus::Analyzing)?;
+        }
 
         let work_dir = ctx.work_dir(asset_id);
         let analysis = self

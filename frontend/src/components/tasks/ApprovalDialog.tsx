@@ -72,6 +72,8 @@ export function ApprovalDialog() {
   const tasks = useTaskStore((s) => s.tasks);
   const resume = useTaskStore((s) => s.resume);
   const cancel = useTaskStore((s) => s.cancel);
+  // 正在提交确认的弹窗任务 id：处理期间禁用按钮并显示 loading，避免重复点击。
+  const [busyId, setBusyId] = useState<number | null>(null);
   const waiting = tasks.filter((t) => t.status === "WAITING_FOR_HUMAN");
 
   // 选文件阶段：任务 RUNNING 且 stage=file（自动填表前的信息提示）。
@@ -84,6 +86,20 @@ export function ApprovalDialog() {
   if (fileStage) return <FileStagePanel task={fileStage} />;
 
   if (waiting.length === 0) return null;
+
+  const confirmTask = async (t: AgentTask) => {
+    if (busyId !== null) return;
+    setBusyId(t.id);
+    try {
+      if (t.agent_name === "publisher") {
+        await api.publishConfirmed(Number(t.payload.draft_id));
+      } else {
+        await resume(t.id);
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -110,14 +126,18 @@ export function ApprovalDialog() {
                 {t.error && <p className="mt-1 text-xs text-bad">{t.error}</p>}
                 <div className="mt-2 flex gap-2">
                   <button
-                    onClick={() =>
-                      void (isPub
-                        ? api.publishConfirmed(Number(t.payload.draft_id))
-                        : resume(t.id))
-                    }
-                    className="rounded border border-accent bg-accent px-3 py-1 text-xs font-medium text-ink hover:brightness-110"
+                    onClick={() => void confirmTask(t)}
+                    disabled={busyId === t.id}
+                    className="inline-flex items-center gap-1.5 rounded border border-accent bg-accent px-3 py-1 text-xs font-medium text-ink hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isPub ? "我已发布" : "确认，继续"}
+                    {busyId === t.id ? (
+                      <>
+                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-ink/40 border-t-ink" />
+                        处理中…
+                      </>
+                    ) : (
+                      <>{isPub ? "我已发布" : "确认，继续"}</>
+                    )}
                   </button>
                   <button
                     onClick={() => void cancel(t.id)}

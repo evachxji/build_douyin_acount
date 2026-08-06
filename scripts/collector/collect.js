@@ -110,15 +110,6 @@ function runOpencliRaw(args) {
   });
 }
 
-async function ytdlpMetadata(url) {
-  const out = await runCmd(
-    job.ytdlpPath,
-    ["--skip-download", "--dump-json", url],
-    600_000,
-  );
-  return JSON.parse(out);
-}
-
 async function ytdlpDownload(url, outBase) {
   const args = [
     "--no-playlist",
@@ -137,6 +128,67 @@ async function ytdlpDownload(url, outBase) {
   const files = fs.readdirSync(job.outputDir).filter((f) => f.startsWith(path.basename(outBase)));
   if (files.length === 0) throw new Error(`下载后未找到文件: ${outBase}`);
   return path.join(job.outputDir, files[0]);
+}
+
+/** 直接下载已签名 CDN 直链（无需 cookie/鉴权），保留超时与重试。 */
+async function ytdlpDownloadDirect(url, outBase) {
+  const args = [
+    "--no-playlist",
+    "--socket-timeout",
+    "30",
+    "--retries",
+    "4",
+    "-o",
+    `${outBase}.%(ext)s`,
+    url,
+  ];
+  await runCmd(job.ytdlpPath, args, 900_000);
+  const files = fs.readdirSync(job.outputDir).filter((f) => f.startsWith(path.basename(outBase)));
+  if (files.length === 0) throw new Error(`下载后未找到文件: ${outBase}`);
+  return path.join(job.outputDir, files[0]);
+}
+
+// Instagram 直链方案（规避 Chrome app-bound 加密导致 cookie 无法导出）：
+// 播放器阶段收集短码 -> 逐条打开单 reels 页拿 media_id -> 页面内 info API 取 CDN 直链与元数据 -> 直链下载。
+const IG_GRAPHQL_APP_ID = "936619743392459";
+
+/** 单 reels 页：al:ios:url meta 拿 media_id -> info API 取直链/赞数/文案/作者。 */
+function buildReelInfoScript(shortcode) {
+  return `
+    (async () => {
+      let al = "";
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        [...document.querySelectorAll('meta')].forEach((mt) => {
+          if (mt.getAttribute('property') === 'al:ios:url') al = mt.getAttribute('content') || "";
+        });
+        if (al) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      const m = /id=(\\d+)/.exec(al || "");
+      const id = m ? m[1] : "";
+      if (!id) return { ok: false, reason: 'no-media-id' };
+      const res = await fetch('https://www.instagram.com/api/v1/media/' + id + '/info/', {
+        credentials: 'include',
+        headers: { 'X-IG-App-ID': ${JSON.stringify(IG_GRAPHQL_APP_ID)} },
+      });
+      const raw = await res.text();
+      let data = null;
+      try { data = raw ? JSON.parse(raw) : null; } catch { return { ok: false, reason: 'bad-json' }; }
+      const it = data?.items?.[0];
+      if (!res.ok || !it) return { ok: false, reason: 'no-item', status: res.status };
+      const vv = (it.video_versions || []).filter((v) => v.url);
+      if (!vv.length) return { ok: false, reason: 'not-video' };
+      vv.sort((a, b) => (b.width || 0) - (a.width || 0));
+      return {
+        ok: true,
+        videoUrl: vv[0].url,
+        likeCount: it.like_count ?? null,
+        title: it.caption?.text ?? "",
+        author: it.user?.username ?? "",
+      };
+    })()
+  `;
 }
 
 function recordVideo(v) {
@@ -185,51 +237,72 @@ async function collectTiktok() {
 }
 
 async function collectInstagram() {
-  // 刷 Reels 推荐播放器：读取当前 URL -> 方向键下一条，收集候选短码。
-  const candidates = new Map();
+  // 阶段1：刷 Reels 推荐播放器收集候选短码（地址栏 URL 随播放推进更新）。
+  const candidates = new Map(); // shortcode -> { id, url, videoUrl, likeCount, title, author }
   const need = job.count * 2;
   await runOpencli(["browser", session, "open", "https://www.instagram.com/reels/"]);
-  for (let i = 0; i < 80 && candidates.size < need; i += 1) {
+  for (let i = 0; i < 120 && candidates.size < need; i += 1) {
     if (markerExists(job.cancelFile)) {
       writeProgress({ state: "cancelled", message: "用户取消" });
       process.exit(2);
     }
     const url = await runOpencliRaw(["browser", session, "get", "url"]).catch(() => "");
-    const m = /\/reels\/([A-Za-z0-9_-]+)\/?/.exec(String(url));
+    const clean = String(url).replace(/[?#].*$/, "");
+    const m = /\/reels\/([A-Za-z0-9_-]+)\/?$/.exec(clean);
     if (m && !candidates.has(m[1])) {
-      candidates.set(m[1], `https://www.instagram.com/reel/${m[1]}/`);
+      candidates.set(m[1], { id: m[1], url: `https://www.instagram.com/reels/${m[1]}/` });
     }
     await runOpencliRaw(["browser", session, "keys", "ArrowDown"]).catch(() => {});
-    await new Promise((r) => setTimeout(r, 2200));
+    await new Promise((r) => setTimeout(r, 2600));
+  }
+
+  // 阶段2：逐条打开单 reels 页，页面内 info API 拿 CDN 直链与元数据。
+  for (const cand of candidates.values()) {
+    if (markerExists(job.cancelFile)) {
+      writeProgress({ state: "cancelled", message: "用户取消" });
+      process.exit(2);
+    }
+    await runOpencli(["browser", session, "open", cand.url]).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1500));
+    let info = { ok: false };
+    for (let attempt = 0; attempt < 2 && !info?.ok; attempt += 1) {
+      info = await runOpencli(["browser", session, "eval", buildReelInfoScript(cand.id)]).catch(
+        () => ({ ok: false }),
+      );
+      if (!info?.ok) await new Promise((r) => setTimeout(r, 2000));
+    }
+    cand.videoUrl = info?.ok ? (info.videoUrl || "") : "";
+    cand.likeCount = info?.likeCount ?? null;
+    cand.title = info?.title || "";
+    cand.author = info?.author || "";
   }
   await runOpencli(["browser", session, "close"]).catch(() => {});
 
+  // 阶段3：赞数过滤 + 直链下载。
   let index = 0;
-  for (const url of candidates.values()) {
+  for (const cand of candidates.values()) {
     if (markerExists(job.cancelFile)) {
       writeProgress({ state: "cancelled", message: "用户取消" });
       process.exit(2);
     }
     if (index >= job.count) break;
-    let meta;
-    try {
-      meta = await ytdlpMetadata(url);
-    } catch {
-      continue; // 元数据解析失败跳过（可能已删除/私密）
+    if (!cand.videoUrl) {
+      writeProgress({ message: `跳过（无直链）: ${cand.url}` });
+      continue;
     }
-    if ((meta.like_count ?? 0) > job.maxLikes) continue;
+    if (cand.likeCount != null && cand.likeCount > job.maxLikes) continue;
     index += 1;
-    const outBase = path.join(job.outputDir, `ig_${meta.id ?? Date.now()}`);
-    const file = await ytdlpDownload(url, outBase);
+    const outBase = path.join(job.outputDir, `ig_${cand.id}`);
+    const file = await ytdlpDownloadDirect(cand.videoUrl, outBase);
     recordVideo({
       index,
       platform: "instagram",
-      id: meta.id ?? "",
-      title: meta.title || meta.description || "",
-      author: meta.uploader || "",
-      url,
-      likes: meta.like_count ?? 0,
-      plays: meta.view_count ?? 0,
+      id: cand.id,
+      title: cand.title,
+      author: cand.author,
+      url: cand.url,
+      likes: cand.likeCount ?? 0,
+      plays: 0,
       comments: 0,
       file,
     });
