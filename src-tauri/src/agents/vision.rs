@@ -46,14 +46,15 @@ impl Agent for VisionAgent {
                 asset_id,
                 asset.title.as_deref(),
             )?;
-        let verdict = FilterAgent::evaluate(&analysis, &self.rules)?;
+        let decision = FilterAgent::evaluate(&analysis, &self.rules)?;
         AnalysesRepo::new(ctx.db).upsert(analysis)?;
-        let status = FilterAgent::verdict_status(verdict);
+        let status = FilterAgent::verdict_status(decision.verdict);
         assets.update_status(asset_id, status)?;
         Ok(AgentOutcome::Succeeded(serde_json::json!({
             "asset_id": asset_id,
-            "verdict": verdict.as_str(),
+            "verdict": decision.verdict.as_str(),
             "status": status.to_string(),
+            "reason": decision.reason,
         })))
     }
 }

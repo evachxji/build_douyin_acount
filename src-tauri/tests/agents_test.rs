@@ -1,7 +1,7 @@
 ﻿use std::path::PathBuf;
 use std::sync::Arc;
 
-use build_douyin_acount_lib::agents::filter::{english_word_ratio, FilterAgent, FilterRules};
+use build_douyin_acount_lib::agents::filter::{FilterAgent, FilterRules};
 use build_douyin_acount_lib::agents::runtime::AgentRuntime;
 use build_douyin_acount_lib::agents::{Agent, AgentOutcome};
 use build_douyin_acount_lib::analysis::llm::AnalysisJson;
@@ -11,7 +11,7 @@ use build_douyin_acount_lib::db::repos::assets::AssetsRepo;
 use build_douyin_acount_lib::db::repos::tasks::TasksRepo;
 use build_douyin_acount_lib::agents::AgentContext;
 use build_douyin_acount_lib::db::Database;
-use build_douyin_acount_lib::domain::analysis::{FilterVerdict, NewAnalysis};
+use build_douyin_acount_lib::domain::analysis::{ConditionVerdict, FilterVerdict, NewAnalysis};
 use build_douyin_acount_lib::domain::asset::{AssetStatus, NewAsset};
 use build_douyin_acount_lib::domain::error::DomainError;
 use build_douyin_acount_lib::domain::task::TaskStatus;
@@ -47,52 +47,160 @@ fn sample_analysis(asset_id: i64) -> NewAnalysis {
 // ---- FilterAgent 纯逻辑 ----
 
 #[test]
-fn english_word_ratio_counts_latin_words() {
-    assert_eq!(english_word_ratio(""), 0.0);
-    assert_eq!(english_word_ratio("一只猫在玩耍"), 0.0);
-    assert_eq!(english_word_ratio("hello world foo bar"), 1.0);
-    assert!((english_word_ratio("hello 你好 world 世界") - 0.5).abs() < 1e-9);
-}
-
-#[test]
-fn filter_skips_large_english_subtitles() {
+fn filter_english_content_no_longer_auto_eliminated() {
     let rules = FilterRules::default();
     let a = sample_analysis(1);
     let with_sub = NewAnalysis {
         has_large_amount_english_subtitle: true,
         ..a.clone()
     };
-    assert_eq!(FilterAgent::evaluate(&with_sub, &rules).expect("ok"), FilterVerdict::SkipDownload);
-}
-
-#[test]
-fn filter_skips_english_dominated_speech() {
-    let rules = FilterRules::default();
-    let a = sample_analysis(1);
+    assert_eq!(FilterAgent::evaluate(&with_sub, &rules).expect("ok").verdict, FilterVerdict::Keep);
     let en = NewAnalysis {
         has_foreign_language: true,
         asr_language: Some("en".to_string()),
         asr_text: Some("welcome to my channel today we cook".to_string()),
         ..a
     };
-    assert_eq!(FilterAgent::evaluate(&en, &rules).expect("ok"), FilterVerdict::SkipDownload);
+    assert_eq!(FilterAgent::evaluate(&en, &rules).expect("ok").verdict, FilterVerdict::Keep);
+}
+
+#[test]
+fn filter_hit_any_keeps() {
+    let rules = FilterRules {
+        hit_conditions: vec!["宠物".to_string(), "风景".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "宠物".to_string(), hit: true, basis: "画面".to_string() },
+            ConditionVerdict { name: "风景".to_string(), hit: false, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    assert_eq!(FilterAgent::evaluate(&a, &rules).expect("ok").verdict, FilterVerdict::Keep);
+}
+
+#[test]
+fn filter_no_hit_eliminates_with_reason() {
+    let rules = FilterRules {
+        hit_conditions: vec!["宠物".to_string(), "风景".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "宠物".to_string(), hit: false, basis: "画面".to_string() },
+            ConditionVerdict { name: "风景".to_string(), hit: false, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    let d = FilterAgent::evaluate(&a, &rules).expect("ok");
+    assert_eq!(d.verdict, FilterVerdict::SkipDownload);
+    assert_eq!(d.reason.as_deref(), Some("no_hit_condition"));
+}
+
+#[test]
+fn filter_exclude_any_eliminates_with_reason() {
+    let rules = FilterRules {
+        exclude_conditions: vec!["色情".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "色情".to_string(), hit: true, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    let d = FilterAgent::evaluate(&a, &rules).expect("ok");
+    assert_eq!(d.verdict, FilterVerdict::SkipDownload);
+    assert_eq!(d.reason.as_deref(), Some("excluded_by_condition: 色情"));
+}
+
+#[test]
+fn filter_exclude_wins_over_hit() {
+    let rules = FilterRules {
+        hit_conditions: vec!["宠物".to_string()],
+        exclude_conditions: vec!["色情".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "宠物".to_string(), hit: true, basis: "画面".to_string() },
+            ConditionVerdict { name: "色情".to_string(), hit: true, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    assert_eq!(FilterAgent::evaluate(&a, &rules).expect("ok").verdict, FilterVerdict::SkipDownload);
+}
+
+#[test]
+fn filter_ignores_blank_conditions() {
+    let rules = FilterRules {
+        hit_conditions: vec!["  ".to_string(), "宠物".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "宠物".to_string(), hit: true, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    assert_eq!(FilterAgent::evaluate(&a, &rules).expect("ok").verdict, FilterVerdict::Keep);
+}
+
+#[test]
+fn filter_legacy_analysis_without_verdicts_ignores_conditions() {
+    let rules = FilterRules {
+        hit_conditions: vec!["宠物".to_string()],
+        exclude_conditions: vec!["色情".to_string()],
+        ..FilterRules::default()
+    };
+    assert_eq!(FilterAgent::evaluate(&sample_analysis(1), &rules).expect("ok").verdict, FilterVerdict::Keep);
+}
+
+#[test]
+fn filter_unjudged_hit_condition_skips_hit_layer() {
+    let rules = FilterRules {
+        hit_conditions: vec!["宠物".to_string(), "风景".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "宠物".to_string(), hit: false, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    assert_eq!(FilterAgent::evaluate(&a, &rules).expect("ok").verdict, FilterVerdict::Keep);
+}
+
+#[test]
+fn filter_unjudged_exclude_condition_does_not_exclude() {
+    let rules = FilterRules {
+        exclude_conditions: vec!["色情".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "长中文对话".to_string(), hit: true, basis: "音频".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    assert_eq!(FilterAgent::evaluate(&a, &rules).expect("ok").verdict, FilterVerdict::Keep);
 }
 
 #[test]
 fn filter_marks_low_quality_as_low_priority() {
     let rules = FilterRules::default();
-    let a = sample_analysis(1);
-    let low = NewAnalysis {
+    let a = NewAnalysis {
         quality_score: Some(40),
-        ..a
+        ..sample_analysis(1)
     };
-    assert_eq!(FilterAgent::evaluate(&low, &rules).expect("ok"), FilterVerdict::LowPriority);
+    assert_eq!(FilterAgent::evaluate(&a, &rules).expect("ok").verdict, FilterVerdict::LowPriority);
 }
 
 #[test]
 fn filter_keeps_clean_content() {
     let rules = FilterRules::default();
-    assert_eq!(FilterAgent::evaluate(&sample_analysis(1), &rules).expect("ok"), FilterVerdict::Keep);
+    assert_eq!(FilterAgent::evaluate(&sample_analysis(1), &rules).expect("ok").verdict, FilterVerdict::Keep);
 }
 
 // ---- Agent Runtime ----
@@ -280,14 +388,19 @@ fn filter_agent_standalone_updates_status_from_db() {
         })
         .expect("insert");
     let en = NewAnalysis {
-        has_large_amount_english_subtitle: true,
+        condition_results: vec![
+            ConditionVerdict { name: "色情".to_string(), hit: true, basis: "画面".to_string() },
+        ],
         ..sample_analysis(asset_id)
     };
     build_douyin_acount_lib::db::repos::analyses::AnalysesRepo::new(&db)
         .upsert(en)
         .expect("upsert");
     let ctx = AgentContext { db: &db, store };
-    let agent = FilterAgent::new(FilterRules::default());
+    let agent = FilterAgent::new(FilterRules {
+        exclude_conditions: vec!["色情".to_string()],
+        ..FilterRules::default()
+    });
     let task = build_douyin_acount_lib::domain::task::AgentTask {
         id: 2,
         agent_name: "filter".to_string(),

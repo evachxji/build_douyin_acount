@@ -13,7 +13,6 @@ pub struct AppSettings {
     pub whisper_python: String,
     pub whisper_script: String,
     pub whisper_model: String,
-    pub english_ratio_threshold: f64,
     pub quality_min_keep: i64,
     /// 抖音发布 sidecar（Node 脚本路径）与浏览器通道。
     pub node_bin: String,
@@ -29,6 +28,12 @@ pub struct AppSettings {
     pub tiktok_ratio: f64,
     pub instagram_ratio: f64,
     pub max_likes: i64,
+    /// 命中条件：任一命中即通过（空 = 不限制）。
+    #[serde(default)]
+    pub hit_conditions: Vec<String>,
+    /// 排除条件：任一命中即淘汰（空 = 不限制）。
+    #[serde(default)]
+    pub exclude_conditions: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -40,7 +45,6 @@ impl Default for AppSettings {
             whisper_python: "scripts/whisper-server/.venv/Scripts/python.exe".to_string(),
             whisper_script: "scripts/whisper-server/whisper_transcribe.py".to_string(),
             whisper_model: "base".to_string(),
-            english_ratio_threshold: 0.6,
             quality_min_keep: 60,
             node_bin: "node".to_string(),
             publisher_script: "scripts/douyin-publisher/publish.js".to_string(),
@@ -52,6 +56,8 @@ impl Default for AppSettings {
             tiktok_ratio: 0.3,
             instagram_ratio: 0.7,
             max_likes: 1_000_000,
+            hit_conditions: Vec::new(),
+            exclude_conditions: Vec::new(),
         }
     }
 }

@@ -82,8 +82,9 @@ impl AppState {
         let rules = {
             let s = self.settings.read().expect("settings lock poisoned");
             FilterRules {
-                english_ratio_threshold: s.english_ratio_threshold,
                 quality_min_keep: s.quality_min_keep,
+                hit_conditions: s.hit_conditions.clone(),
+                exclude_conditions: s.exclude_conditions.clone(),
             }
         };
         let (node_bin, script, collector_script, ytdlp) = {
