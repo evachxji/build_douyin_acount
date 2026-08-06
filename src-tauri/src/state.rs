@@ -57,7 +57,8 @@ impl AppState {
         let s = self.settings.read().expect("settings lock poisoned");
         let script = self.resolve_path(&s.whisper_script);
         let whisper_model = s.whisper_model.clone();
-        let python = s.whisper_python.clone();
+        // 与脚本一致：解释器路径也解析为绝对路径（应用进程 cwd 在 src-tauri 下，相对路径会找不到）。
+        let python = self.resolve_path(&s.whisper_python).to_string_lossy().into_owned();
         let vision_model = s.vision_model.clone();
         let llm_model = s.llm_model.clone();
         let ollama_url = s.ollama_url.clone();
