@@ -96,16 +96,16 @@ pub fn parse_analysis_json(raw: &str) -> Result<AnalysisJson, DomainError> {
     })
 }
 
-/// 把模型按编号输出的判定映射回配置条件原文（编号 1..=N：先命中条件后排除条件）。
+/// 把模型按编号输出的判定映射回配置条件原文（编号 1..=N：先排除条件后命中条件）。
 /// 编号越界、重复编号、空条件名一律跳过，保证与设置列表精确对应。
 pub fn resolve_conditions(
     raw: &[IndexVerdict],
     hit_conditions: &[String],
     exclude_conditions: &[String],
 ) -> Vec<ConditionVerdict> {
-    let names: Vec<&str> = hit_conditions
+    let names: Vec<&str> = exclude_conditions
         .iter()
-        .chain(exclude_conditions.iter())
+        .chain(hit_conditions.iter())
         .map(|s| s.as_str())
         .collect();
     let mut seen = std::collections::HashSet::new();
@@ -150,19 +150,19 @@ impl super::pipeline::Llm for OllamaLlm {
             .unwrap_or("（无对白/音频转写为空）");
         let mut filter_lines = Vec::new();
         let mut idx = 0usize;
-        for c in &req.hit_conditions {
-            idx += 1;
-            filter_lines.push(format!("{idx}. 命中条件：{c}"));
-        }
         for c in &req.exclude_conditions {
             idx += 1;
             filter_lines.push(format!("{idx}. 排除条件：{c}"));
+        }
+        for c in &req.hit_conditions {
+            idx += 1;
+            filter_lines.push(format!("{idx}. 命中条件：{c}"));
         }
         let filter_section = if filter_lines.is_empty() {
             String::new()
         } else {
             format!(
-                "\n\n筛选要求（按编号逐条判定，共{idx}条，不得遗漏；conditions 中每条 index 必须与编号一致）：\n{}",
+                "\n\n筛选要求（先逐条判定排除条件：若任一排除条件命中，则无需再判定命中条件，输出已判定条目即可；若排除条件全部未命中，再逐条判定全部命中条件。conditions 中每条 index 必须与编号一致）：\n{}",
                 filter_lines.join("\n")
             )
         };

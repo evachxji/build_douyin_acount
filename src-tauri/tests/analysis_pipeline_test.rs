@@ -111,6 +111,7 @@ fn parse_analysis_json_tolerates_invalid_conditions() {
 fn resolve_conditions_maps_index_to_configured_name() {
     let hits = vec!["宠物".to_string(), "生活".to_string()];
     let excludes = vec!["色情".to_string()];
+    // 编号顺序：先排除后命中 -> 1=色情, 2=宠物, 3=生活
     let raw = vec![
         build_douyin_acount_lib::analysis::llm::IndexVerdict {
             index: 1,
@@ -143,7 +144,7 @@ fn resolve_conditions_maps_index_to_configured_name() {
     assert_eq!(
         resolved[0],
         build_douyin_acount_lib::domain::analysis::ConditionVerdict {
-            name: "宠物".to_string(),
+            name: "色情".to_string(),
             hit: true,
             basis: "画面".to_string(),
         }
@@ -151,7 +152,7 @@ fn resolve_conditions_maps_index_to_configured_name() {
     assert_eq!(
         resolved[1],
         build_douyin_acount_lib::domain::analysis::ConditionVerdict {
-            name: "色情".to_string(),
+            name: "生活".to_string(),
             hit: true,
             basis: "画面".to_string(),
         }
@@ -223,8 +224,9 @@ impl Llm for FakeLlm {
             summary: req.frames.first().map(|f| f.description.clone()).unwrap_or_default(),
             recommended_caption: "测试文案".to_string(),
             conditions: req
-                .hit_conditions
+                .exclude_conditions
                 .iter()
+                .chain(req.hit_conditions.iter())
                 .enumerate()
                 .map(|(i, _)| build_douyin_acount_lib::analysis::llm::IndexVerdict {
                     index: i + 1,
