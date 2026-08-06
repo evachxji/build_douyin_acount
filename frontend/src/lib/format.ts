@@ -82,3 +82,8 @@ export function formatDateTime(v: string | null | undefined): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+/** 筛选条件列表清洗：去首尾空白、丢弃空行。 */
+export function cleanConditions(items: string[]): string[] {
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}

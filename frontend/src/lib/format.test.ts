@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCount, formatDuration, statusMeta } from "./format";
+import { cleanConditions, formatCount, formatDuration, statusMeta } from "./format";
 
 describe("formatDuration", () => {
   it("formats seconds as mm:ss", () => {
@@ -25,5 +25,11 @@ describe("statusMeta", () => {
     expect(statusMeta("ELIMINATED").label).toBe("淘汰");
     expect(statusMeta("SELECTED").label).toBe("待发布");
     expect(statusMeta("WAITING_FOR_HUMAN").label).toBe("待人工确认");
+  });
+});
+
+describe("cleanConditions", () => {
+  it("trims whitespace and drops empty rows", () => {
+    expect(cleanConditions([" 宠物 ", "", "  ", "风景"])).toEqual(["宠物", "风景"]);
   });
 });

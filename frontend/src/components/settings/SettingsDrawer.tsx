@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import type { AppSettings } from "../../api/types";
+import { cleanConditions } from "../../lib/format";
 
 const EMPTY: AppSettings = {
   ollama_url: "",
@@ -9,8 +10,9 @@ const EMPTY: AppSettings = {
   whisper_python: "",
   whisper_script: "",
   whisper_model: "",
-  english_ratio_threshold: 0.6,
   quality_min_keep: 60,
+  hit_conditions: [],
+  exclude_conditions: [],
   node_bin: "node",
   publisher_script: "",
   publisher_browser: "chrome",
@@ -22,6 +24,60 @@ const EMPTY: AppSettings = {
   instagram_ratio: 0.7,
   max_likes: 1_000_000,
 };
+
+const conditionField =
+  "h-9 w-full rounded border border-line bg-ink px-2 text-sm text-paper focus:border-accent/60 focus:outline-none";
+
+function ConditionList({
+  title,
+  placeholder,
+  items,
+  onChange,
+}: {
+  title: string;
+  placeholder: string;
+  items: string[];
+  onChange: (items: string[]) => void;
+}) {
+  const update = (i: number, v: string) => {
+    const next = items.slice();
+    next[i] = v;
+    onChange(next);
+  };
+  const remove = (i: number) => onChange(items.filter((_, idx) => idx !== i));
+  return (
+    <div className="border-t border-line pt-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-mute">{title}</p>
+      {items.length === 0 && <p className="mt-2 text-xs text-mute">不限制（空列表）</p>}
+      <div className="mt-2 space-y-2">
+        {items.map((item, i) => (
+          <div key={i} className="flex gap-2">
+            <input
+              className={conditionField}
+              value={item}
+              placeholder={placeholder}
+              onChange={(e) => update(i, e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="h-9 shrink-0 rounded border border-line px-3 text-xs text-mute hover:text-bad"
+            >
+              删除
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange([...items, ""])}
+        className="mt-2 text-xs text-accent hover:brightness-110"
+      >
+        + 添加条件
+      </button>
+    </div>
+  );
+}
 
 export function SettingsDrawer({
   open,
@@ -47,7 +103,13 @@ export function SettingsDrawer({
 
   const save = async () => {
     try {
-      await api.updateSettings(settings);
+      const cleaned: AppSettings = {
+        ...settings,
+        hit_conditions: cleanConditions(settings.hit_conditions),
+        exclude_conditions: cleanConditions(settings.exclude_conditions),
+      };
+      await api.updateSettings(cleaned);
+      setSettings(cleaned);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -90,27 +152,27 @@ export function SettingsDrawer({
             <span className="text-xs text-mute">Whisper 模型</span>
             <input className={field} value={settings.whisper_model} onChange={(e) => set({ whisper_model: e.target.value })} />
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-xs text-mute">英文对白阈值（0-1）</span>
-              <input
-                type="number"
-                step="0.05"
-                className={field}
-                value={settings.english_ratio_threshold}
-                onChange={(e) => set({ english_ratio_threshold: Number(e.target.value) })}
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs text-mute">质量分保留线（0-100）</span>
-              <input
-                type="number"
-                className={field}
-                value={settings.quality_min_keep}
-                onChange={(e) => set({ quality_min_keep: Number(e.target.value) })}
-              />
-            </label>
-          </div>
+          <label className="block">
+            <span className="text-xs text-mute">质量分保留线（0-100）</span>
+            <input
+              type="number"
+              className={field}
+              value={settings.quality_min_keep}
+              onChange={(e) => set({ quality_min_keep: Number(e.target.value) })}
+            />
+          </label>
+          <ConditionList
+            title="命中条件"
+            placeholder="如：宠物、生活、风景、手工"
+            items={settings.hit_conditions}
+            onChange={(hit_conditions) => set({ hit_conditions })}
+          />
+          <ConditionList
+            title="排除条件"
+            placeholder="如：长中文对话、色情、性暗示"
+            items={settings.exclude_conditions}
+            onChange={(exclude_conditions) => set({ exclude_conditions })}
+          />
           <div className="border-t border-line pt-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-mute">
               采集设置

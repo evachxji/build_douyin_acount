@@ -102,8 +102,9 @@ export interface AppSettings {
   whisper_python: string;
   whisper_script: string;
   whisper_model: string;
-  english_ratio_threshold: number;
   quality_min_keep: number;
+  hit_conditions: string[];
+  exclude_conditions: string[];
   node_bin: string;
   publisher_script: string;
   publisher_browser: string;
