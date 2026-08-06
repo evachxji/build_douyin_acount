@@ -79,30 +79,37 @@ pub struct ConditionVerdict {
 - 具体条件清单由代码动态拼入 user 消息末尾（`analysis/pipeline.rs` 或 `analysis/llm.rs`），格式示例：
 
   ```
-  筛选要求（请逐条判定）：
-  命中条件（至少命中其一）：宠物、生活、风景、手工
-  排除条件（任一命中即排除）：长中文对话、长英文对话、大量英文字幕、色情、性暗示
+  筛选要求（按编号逐条判定，共9条，不得遗漏；conditions 中每条 index 必须与编号一致）：
+  1. 命中条件：宠物
+  2. 命中条件：生活
+  3. 命中条件：风景
+  4. 命中条件：手工
+  5. 排除条件：长中文对话
+  6. 排除条件：长英文对话
+  7. 排除条件：大量英文字幕
+  8. 排除条件：色情
+  9. 排除条件：性暗示
   ```
 
 - 条件为空时不拼该段，请求与现在完全一致。
 
 ### 输出结构
 
-`AnalysisJson` 增加 `conditions` 字段（JSON 数组）：
+`AnalysisJson` 增加 `conditions` 字段（JSON 数组，按编号判定）：
 
 ```json
 {
   "category": "...",
   "...其余原有字段...",
   "conditions": [
-    { "name": "宠物", "hit": true, "basis": "画面" },
-    { "name": "长中文对话", "hit": false, "basis": "音频" }
+    { "index": 1, "hit": true, "basis": "画面" },
+    { "index": 5, "hit": false, "basis": "音频" }
   ]
 }
 ```
 
 - `parse_analysis_json` 对 `conditions` 缺失、非数组、元素字段缺失时：容错（跳过非法元素），最终允许为空列表；保证旧模型输出仍可解析。
-- LLM 返回的 `name` 可能不完全等于设置中的字符串（如多空格、错别字）；过滤层按**精确匹配设置列表中的原文**判断，LLM 输出中无法匹配的条目忽略。
+- **编号映射**：`resolve_conditions` 把模型输出的 `index` 按「先命中条件后排除条件」的顺序映射回设置中的条件原文，生成 `ConditionVerdict { name, hit, basis }` 后入库；编号越界、重复编号、空条件名一律跳过（重复取第一条）。过滤层仍按 `name` 精确匹配，但 name 来自设置列表本身，不再依赖模型回显中文。
 
 ## 过滤规则与优先级
 
