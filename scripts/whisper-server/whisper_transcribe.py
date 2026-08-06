@@ -20,8 +20,13 @@ def main() -> int:
     try:
         from faster_whisper import WhisperModel
 
-        model = WhisperModel(model_name, device="auto", compute_type="default")
-        segments, info = model.transcribe(wav_path, vad_filter=True)
+        try:
+            model = WhisperModel(model_name, device="auto", compute_type="default")
+            segments, info = model.transcribe(wav_path, vad_filter=True)
+        except Exception:
+            # CUDA 库缺失（如 cublas64_12.dll）时回退 CPU，保证本地可用。
+            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            segments, info = model.transcribe(wav_path, vad_filter=True)
         text = "".join(seg.text for seg in segments).strip()
         print(json.dumps({"text": text, "language": info.language}, ensure_ascii=False))
         return 0
