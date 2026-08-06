@@ -6,12 +6,14 @@
 
 ## 背景与目标
 
-当前筛选只有三类写死规则：大量英文字幕直接淘汰、英文主导对白（词占比阈值）淘汰、质量分低于阈值淘汰。用户希望在 AI 分析阶段增加**可配置的自定义筛选条件**：
+当前筛选有两类写死的英文规则（大量英文字幕直接淘汰、英文主导对白按词占比阈值淘汰）和质量分规则。**用户决定：移除两条内置英文规则，不再由代码自动过滤英文相关内容；英文相关内容以后由用户自己配置排除条件来筛。质量分规则保留。** 同时增加**可配置的自定义筛选条件**：
 
 - **命中条件**：题材/内容要求列表，任一命中即通过（OR）；列表为空 = 不限制。
 - **排除条件**：违禁/不想要内容的列表，任一命中即淘汰；列表为空 = 不限制。
 
 条件由用户在设置界面手工维护，可以是任意自然语言描述（例如「宠物」「长中文对话」「色情」「性暗示」），判定依据可以是画面或音频，由本地 LLM 在分析时逐条判断。
+
+由此，英文过滤从「内置规则」转为「用户可选配置」：用户若希望排除「大量英文字幕」「长英文对话」，把它们加入排除条件即可；不配置则不再有任何英文相关的自动过滤。
 
 ## 术语
 
@@ -25,19 +27,22 @@
 - 不做条件组合逻辑（组内 OR、组间 AND 等复杂表达式）。
 - 不做采集任务级临时条件（条件只存在全局设置中）。
 - 不在资产详情页展示逐条判定结果（数据会入库，UI 展示留待后续）。
+- 不移除 LLM 输出与库中的 `has_foreign_language` / `has_large_amount_english_subtitle` 元数据字段（保留数据与列，仅不再参与过滤）。
 
 ## 数据模型
 
 ### AppSettings（settings.rs）
 
-新增两个字段，默认空数组，空数组语义 = 不限制：
+**移除** `english_ratio_threshold` 字段（它只服务于被删除的英文对白规则；serde 默认忽略未知字段，旧保存的 JSON 里残留该字段不会导致反序列化失败）。
+
+**新增**两个字段，默认空数组，空数组语义 = 不限制：
 
 ```rust
 #[serde(default)] pub hit_conditions: Vec<String>,
 #[serde(default)] pub exclude_conditions: Vec<String>,
 ```
 
-**必须使用 `#[serde(default)]`**：`app_settings` 表整行是完整 JSON，旧数据缺少这两个字段时，若无 default 会导致整个设置反序列化失败、整体回退默认值（既有已知坑）。前端 `AppSettings` 类型同步增加 `hit_conditions: string[]` 与 `exclude_conditions: string[]`。
+**必须使用 `#[serde(default)]`**：`app_settings` 表整行是完整 JSON，旧数据缺少这两个字段时，若无 default 会导致整个设置反序列化失败、整体回退默认值（既有已知坑）。前端 `AppSettings` 类型同步增加 `hit_conditions: string[]` 与 `exclude_conditions: string[]`，并移除 `english_ratio_threshold`（设置抽屉中对应的「英文对白阈值」输入框一并删除）。
 
 ### analysis_results 表（migrations.rs）
 
@@ -70,6 +75,7 @@ pub struct ConditionVerdict {
 ### Prompt
 
 - 静态 prompt `resources/prompts/vision-synthesize.md` 保持现有通用说明，增加一段「筛选条件判定」说明：如果请求中提供了筛选条件，必须逐条判定并输出；依据来源包括关键帧（画面）与音频转写（音频）；无条件的请求不出现该段。
+- `has_foreign_language` / `has_large_amount_english_subtitle` 两个输出字段保留（作元数据），但过滤层不再消费它们。
 - 具体条件清单由代码动态拼入 user 消息末尾（`analysis/pipeline.rs` 或 `analysis/llm.rs`），格式示例：
 
   ```
@@ -100,7 +106,7 @@ pub struct ConditionVerdict {
 
 ## 过滤规则与优先级
 
-`FilterRules` 增加：
+`FilterRules` **移除** `english_ratio_threshold` 字段与 `english_word_ratio` 函数（后者仅服务于被删除的英文规则），**增加**：
 
 ```rust
 pub hit_conditions: Vec<String>,
@@ -110,14 +116,17 @@ pub exclude_conditions: Vec<String>,
 `FilterAgent::evaluate` 判定顺序（`state.rs` 从设置注入两个列表）：
 
 1. **排除条件层**：`exclude_conditions` 非空 且 任一条件在 `condition_results` 中 `hit=true` → `SkipDownload`（淘汰）。
-2. **命中条件层**：`hit_conditions` 非空 且 全部条件 `hit=false` → `SkipDownload`（淘汰）。
-3. **原有规则层**：大段英文字幕、英文主导对白、质量分低于阈值，行为不变。
+2. **命中条件层**：`hit_conditions` 非空 且 全部条件均已判定 且 全部 `hit=false` → `SkipDownload`（淘汰）。
+3. **质量分规则**（保留）：`quality_score < quality_min_keep` → `LowPriority`。
 4. 冲突时排除优先（例如既是「宠物」又命中「色情」→ 淘汰）。
-5. 两个列表均为空，或旧分析结果没有 `condition_results` 数据 → 跳过第 1、2 层，行为与现状完全一致。
+5. 两个列表均为空，或旧分析结果没有 `condition_results` 数据 → 跳过第 1、2 层。
+6. **未判定的命中条件不参与判定**：若某条已配置的命中条件未出现在 `condition_results`（条件在分析之后才新增、或 LLM 漏判），命中条件层整体跳过，避免基于未判定条件误杀；排除条件层只对已判定条目生效，未判定的排除条件不构成排除。
+
+**删除原有两条英文规则**：不再检查 `has_large_amount_english_subtitle`、不再检查 `has_foreign_language` + 词占比。原 `filter_skips_large_english_subtitles`、`filter_skips_english_dominated_speech`、`english_word_ratio_counts_latin_words` 测试删除。
 
 判定结果映射沿用现有 `verdict_status`：`SkipDownload` → `Eliminated`。
 
-为便于排查，`VisionAgent` 成功输出增加 `reason` 字段（可选字符串），记录导致淘汰的条件名（如 `excluded_by_condition: 色情` 或 `no_hit_condition`），仅写入任务日志，不改 UI。
+为便于排查，`FilterAgent::evaluate` 返回结构化 `FilterDecision { verdict, reason }`（不再只返回 `FilterVerdict`）；`VisionAgent` 成功输出把 `reason` 写入任务日志（如 `excluded_by_condition: 色情` 或 `no_hit_condition`），不改 UI。
 
 ## 前端 UI
 
@@ -131,10 +140,11 @@ pub exclude_conditions: Vec<String>,
 
 ## 错误处理与兼容性
 
-- 设置反序列化：新字段必须有 `#[serde(default)]`，旧设置行缺失字段时其余设置保持不变。
+- 设置反序列化：新字段必须有 `#[serde(default)]`，旧设置行缺失字段时其余设置保持不变；删除 `english_ratio_threshold` 对旧 JSON 安全（serde 默认忽略未知字段）。
 - LLM 输出 `conditions` 缺失/非法：回退空列表，过滤跳过条件层，不影响分析落库。
 - 条件列表含空字符串：保存时前端过滤空行；后端 `evaluate` 忽略空字符串条件。
 - 旧分析结果（无新列数据）：`condition_results` 为空，条件层不生效。
+- 行为变化说明：删除英文规则后，含英文的视频不再被自动淘汰（除非用户配置了对应排除条件）；已有分析数据中的 `has_foreign_language` / `has_large_amount_english_subtitle` 保留，状态不回溯变更。
 - 迁移失败：`Database::open` 现有错误处理已覆盖，不新增特殊路径。
 
 ## 测试计划
@@ -146,13 +156,16 @@ pub exclude_conditions: Vec<String>,
   - 无 `conditions`（旧输出）解析成功且为空列表；
   - `conditions` 为非法 JSON 类型（如字符串）时容错为空列表。
 - `FilterAgent::evaluate` 规则矩阵：
-  - 无任何条件列表 → 行为与旧规则一致；
-  - 命中条件任一命中 → Keep；
-  - 命中条件全部未命中 → SkipDownload；
-  - 排除条件任一命中 → SkipDownload；
-  - 命中与排除冲突（同一条视频两个都中）→ 排除优先；
-  - 空字符串条件被忽略；
-  - 旧分析（无判定数据）不受新条件影响。
+- 无任何条件列表 → 仅质量分规则生效（含英文字幕/英文对白的样例应返回 Keep 而非 SkipDownload）；
+- 命中条件任一命中 → Keep；
+- 命中条件全部未命中 → SkipDownload；
+- 排除条件任一命中 → SkipDownload；
+- 命中与排除冲突（同一条视频两个都中）→ 排除优先；
+- 空字符串条件被忽略；
+- 旧分析（无判定数据）不受新条件影响（条件层跳过）；
+- 已配置命中条件中有未判定条目（分析早于条件配置）→ 命中条件层跳过、不误杀；
+- 已配置排除条件全部未判定 → 不构成排除。
+- 设置测试：`settings_test.rs` 移除 `english_ratio_threshold` 断言，roundtrip 增加命中/排除条件；旧 JSON（含已删除字段、缺新字段）仍可加载。
 
 ### 前端测试
 
@@ -165,16 +178,16 @@ pub exclude_conditions: Vec<String>,
 
 ## 实施步骤
 
-1. **先写失败测试**：`filter` 规则矩阵 + `parse_analysis_json` 兼容解析 → 验证：新测试红（旧代码不通过）。
-2. **数据层**：migration 加列；`domain/analysis.rs`、`db/repos/analyses.rs` 扩展结构 → 验证：`cargo test`。
-3. **分析管线**：`analysis/llm.rs` 解析 conditions；`pipeline.rs` 动态拼条件段 → 验证：`cargo test`。
-4. **过滤与设置**：`filter.rs` 新规则；`settings.rs` 新字段；`state.rs` 注入；`VisionAgent` 输出 reason → 验证：`cargo test`。
-5. **前端**：`types.ts` 加字段；`SettingsDrawer.tsx` 条件列表编辑区 → 验证：`pnpm test`、`pnpm build`。
+1. **领域与数据层**：`domain/analysis.rs` 加 `ConditionVerdict` 与字段；migration 加列 + `Database::open` 幂等补列；`db/repos/analyses.rs` 读写新列；所有 `NewAnalysis` 构造点补 `condition_results`；`db_repos_test.rs` 增加 condition_results 往返测试 → 验证：`cargo test`。
+2. **设置模型**：`settings.rs` 删 `english_ratio_threshold`、加两个 `#[serde(default)]` 字段；`settings_test.rs` 同步 → 验证：`cargo test`。
+3. **分析管线与 LLM 协议**：`analysis/llm.rs` 的 `AnalysisJson` 加 `conditions`、`parse_analysis_json` 容错解析、`OllamaLlm` 动态拼条件段；`pipeline.rs` 的 `analyze` 增加条件参数并填充 `condition_results`；更新 prompt；更新所有测试桩 → 验证：`cargo test`。
+4. **过滤规则与装配**：`filter.rs` 删除两条英文规则与 `english_word_ratio`、`FilterRules` 换新字段、`evaluate` 返回 `FilterDecision`；`vision.rs` 输出 reason；`state.rs` 从设置注入条件列表 → 验证：`cargo test`、`cargo clippy --all-targets`。
+5. **前端**：`types.ts` 同步字段；`SettingsDrawer.tsx` 删英文阈值输入、加命中/排除条件列表编辑区 → 验证：`pnpm test`、`pnpm build`。
 6. **全量回归**：`cargo test`、`cargo clippy --all-targets`、`pnpm test`、`pnpm build` → 验证：全绿。
-7. **收尾**：更新 `docs/02-architecture.md`（如架构图涉及筛选）与相关文档，提交。
+7. **收尾**：更新 `docs/02-architecture.md`（筛选规则描述）与相关文档，提交。
 
 ## 验证标准
 
 - 所有自动化测试通过，clippy 零警告。
-- 空条件列表时行为与现状逐条等价（旧测试全部保持绿色即证明）。
+- 空条件列表时行为 = 仅质量分规则；含大段英文字幕/英文主导对白的样例不再被自动淘汰（有对应测试证明）。
 - 配置「命中：宠物、生活、风景、手工；排除：长中文对话、色情、性暗示」后，重分析能按规则产出候选/淘汰，且任务日志能指出淘汰条件。
