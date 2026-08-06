@@ -44,6 +44,8 @@
 
 **必须使用 `#[serde(default)]`**：`app_settings` 表整行是完整 JSON，旧数据缺少这两个字段时，若无 default 会导致整个设置反序列化失败、整体回退默认值（既有已知坑）。前端 `AppSettings` 类型同步增加 `hit_conditions: string[]` 与 `exclude_conditions: string[]`，并移除 `english_ratio_threshold`（设置抽屉中对应的「英文对白阈值」输入框一并删除）。
 
+**另新增** `condition_basis: HashMap<String, ConditionBasis>`（条件名 -> 画面/音频/不限，`#[serde(default)]`）。判定依据由本地 LLM 在分析前**惰性自动分类**并持久化：某条件依据未知时，Vision Agent 先调用一次 `classify_condition_bases` 分类并写入设置，供两阶段分析使用；`update_settings` 保存时保留库中已有分类结果，避免前端陈旧副本清空。旧设置无此字段时默认空（等价于全部「不限」）。
+
 ### analysis_results 表（migrations.rs）
 
 新增一列，存储 LLM 对该资产的逐条条件判定：
@@ -79,18 +81,17 @@ pub struct ConditionVerdict {
 - 具体条件清单由代码动态拼入 user 消息末尾（`analysis/pipeline.rs` 或 `analysis/llm.rs`），格式示例：
 
   ```
-  筛选要求（按编号逐条判定，共9条，不得遗漏；conditions 中每条 index 必须与编号一致）：
-  1. 命中条件：宠物
-  2. 命中条件：生活
-  3. 命中条件：风景
-  4. 命中条件：手工
-  5. 排除条件：长中文对话
-  6. 排除条件：长英文对话
-  7. 排除条件：大量英文字幕
-  8. 排除条件：色情
-  9. 排除条件：性暗示
+  筛选要求（按编号逐条判定；conditions 中每条 index 必须与编号一致）：
+  1. 长中文对话（排除）
+  2. 长英文对话（排除）
+  ...（仅列出本阶段需要判定的条件，编号为完整清单中的绝对编号）
   ```
 
+- **两阶段判定（2026-08-06 增补）**：
+  - 完整编号顺序 = 音频类排除条件 -> 其余排除条件 -> 命中条件（绝对编号）。
+  - 阶段1（便宜）：抽音频 + Whisper 转写后，用 `judge_conditions` 仅依据标题与转写判定「音频」类排除条件；任一命中即早退返回部分分析（category/quality 为空、未抽帧未走视觉），由 Vision Agent 置为淘汰并记录 reason。
+  - 阶段2（贵）：阶段1 全部未命中（或无音频类条件）才抽帧 + 逐帧视觉 + LLM 综合，判定其余排除条件与命中条件，并把阶段1 的未命中判定并入最终 `condition_results`。
+  - 音频提取/转写失败或转写为空时跳过阶段1，安全回退阶段2（未判定的排除条件不构成排除）。
 - 条件为空时不拼该段，请求与现在完全一致。
 
 ### 输出结构
