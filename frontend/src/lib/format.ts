@@ -71,3 +71,14 @@ export function taskTypeLabel(type: string): string {
   };
   return map[type] ?? type;
 }
+
+/** SQLite 或 RFC3339 时间 -> 本地时区 "MM-DD HH:mm"；空值显示占位符。 */
+export function formatDateTime(v: string | null | undefined): string {
+  if (!v) return "—";
+  // SQLite datetime('now') 输出 UTC 且无时区标记，补 Z 后统一按 UTC 解析。
+  const iso = v.includes("T") ? v : `${v.replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return v;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}

@@ -67,9 +67,6 @@ export function TopBar({
         <h1 className="text-base font-bold tracking-wide text-paper">
           短视频素材运营台
         </h1>
-        <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">
-          Phase 3
-        </span>
       </div>
 
       <input

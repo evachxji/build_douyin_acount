@@ -10,13 +10,14 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api/client";
 import type { AnalysisResult, ContentCopy } from "../../api/types";
 
-export function DetailPanel() {
+export function DetailPanel({ width }: { width: number }) {
   const focusId = useSelectionStore((s) => s.focusId);
   const assets = useAssetsStore((s) => s.assets);
   const removeAsset = useAssetsStore((s) => s.removeAsset);
   const updateStatus = useAssetsStore((s) => s.updateStatus);
   const analyzeSelected = useAssetsStore((s) => s.analyzeSelected);
   const setTaskOpen = useTaskStore((s) => s.setOpen);
+  const tasks = useTaskStore((s) => s.tasks);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [copy, setCopy] = useState<ContentCopy | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,6 +37,24 @@ export function DetailPanel() {
     void api.getAnalysis(asset.id).then(setAnalysis).catch(() => setAnalysis(null));
     void api.getCopy(asset.id).then(setCopy).catch(() => setCopy(null));
   }, [asset?.id, asset]);
+
+  // 准备发布后保持 loading，直到「请选择视频文件」弹窗出现（publisher 任务 stage=file）。
+  // 60 秒超时兜底，避免任务异常时按钮一直转。
+  useEffect(() => {
+    if (!publishing) return;
+    const fileStage = tasks.some(
+      (t) =>
+        t.agent_name === "publisher" &&
+        t.payload.stage === "file" &&
+        (t.status === "RUNNING" || t.status === "PENDING"),
+    );
+    if (fileStage) {
+      setPublishing(false);
+      return;
+    }
+    const timer = setTimeout(() => setPublishing(false), 60_000);
+    return () => clearTimeout(timer);
+  }, [publishing, tasks]);
 
   const handleGenerateCopy = async () => {
     if (!asset) return;
@@ -60,7 +79,10 @@ export function DetailPanel() {
 
   if (!asset) {
     return (
-      <aside className="flex w-[380px] shrink-0 flex-col items-center justify-center border-l border-line bg-panel/60 text-sm text-mute">
+      <aside
+        style={{ width }}
+        className="flex shrink-0 flex-col items-center justify-center border-l border-line bg-panel/60 text-sm text-mute"
+      >
         点击左侧素材查看详情
       </aside>
     );
@@ -131,21 +153,21 @@ export function DetailPanel() {
   const handlePreparePublish = async () => {
     setPublishing(true);
     try {
-      const res = await api.preparePublish(asset.id);
+      await api.preparePublish(asset.id);
       setTaskOpen(true);
       // 任务入队后稍等后台 worker 拉起 sidecar，再刷新任务面板。
       setTimeout(() => void useTaskStore.getState().refresh(), 1200);
-      return res;
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
-      return null;
-    } finally {
       setPublishing(false);
     }
   };
 
   return (
-    <aside className="flex w-[380px] shrink-0 flex-col overflow-y-auto border-l border-line bg-panel/60">
+    <aside
+      style={{ width }}
+      className="flex shrink-0 flex-col overflow-y-auto border-l border-line bg-panel/60"
+    >
       <div className="p-4">
         <video
           key={asset.file_path}
@@ -295,14 +317,21 @@ export function DetailPanel() {
           </button>
         )}
         {asset.status === "SELECTED" && (
-          <button
-            onClick={() => void handlePreparePublish()}
-            disabled={publishing}
-            className="h-9 rounded border border-accent bg-accent px-3 text-sm font-medium text-ink hover:brightness-110 disabled:opacity-40"
-            title="打开独立浏览器窗口，自动上传视频并填写标题/文案/话题（最终发布由你本人点击）"
-          >
-            {publishing ? "准备中…" : "准备发布"}
-          </button>
+        <button
+          onClick={() => void handlePreparePublish()}
+          disabled={publishing}
+          className="inline-flex h-9 items-center justify-center gap-1.5 rounded border border-accent bg-accent px-3 text-sm font-medium text-ink hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          title="打开独立浏览器窗口，自动上传视频并填写标题/文案/话题（最终发布由你本人点击）"
+        >
+          {publishing ? (
+            <>
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink/40 border-t-ink" />
+              准备中…
+            </>
+          ) : (
+            "准备发布"
+          )}
+        </button>
         )}
         <button
           onClick={() => void handleDelete()}

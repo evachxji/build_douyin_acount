@@ -76,6 +76,14 @@ export function ApprovalDialog() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const waiting = tasks.filter((t) => t.status === "WAITING_FOR_HUMAN");
 
+  // 确认成功后保持 loading，直到该任务离开等待列表（弹窗随之关闭）。
+  useEffect(() => {
+    if (busyId === null) return;
+    if (!tasks.some((t) => t.id === busyId && t.status === "WAITING_FOR_HUMAN")) {
+      setBusyId(null);
+    }
+  }, [busyId, tasks]);
+
   // 选文件阶段：任务 RUNNING 且 stage=file（自动填表前的信息提示）。
   const fileStage = tasks.find(
     (t) =>
@@ -91,12 +99,13 @@ export function ApprovalDialog() {
     if (busyId !== null) return;
     setBusyId(t.id);
     try {
-      if (t.agent_name === "publisher") {
-        await api.publishConfirmed(Number(t.payload.draft_id));
-      } else {
-        await resume(t.id);
-      }
-    } finally {
+      const op =
+        t.agent_name === "publisher"
+          ? api.publishConfirmed(Number(t.payload.draft_id))
+          : resume(t.id);
+      await op;
+      // 成功后不立即复位：保持 loading，由上方 effect 在任务离开等待列表时复位。
+    } catch {
       setBusyId(null);
     }
   };

@@ -58,8 +58,14 @@ export function SettingsDrawer({
     "h-9 w-full rounded border border-line bg-ink px-2 text-sm text-paper focus:border-accent/60 focus:outline-none";
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm">
-      <div className="flex h-full w-[420px] flex-col border-l border-line bg-panel p-5 shadow-2xl">
+    <div
+      className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex h-full w-[420px] flex-col border-l border-line bg-panel p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-paper">设置</h2>
           <button onClick={onClose} className="text-sm text-mute hover:text-paper">

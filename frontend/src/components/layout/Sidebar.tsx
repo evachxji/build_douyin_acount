@@ -11,7 +11,7 @@ const STATUS_ORDER = [
   "DOWNLOAD_FAILED",
 ];
 
-export function Sidebar() {
+export function Sidebar({ width }: { width: number }) {
   const overview = useAssetsStore((s) => s.overview);
   const filter = useAssetsStore((s) => s.filter);
   const setFilter = useAssetsStore((s) => s.setFilter);
@@ -20,7 +20,10 @@ export function Sidebar() {
     (filter.category ?? "") === name;
 
   return (
-    <aside className="w-56 shrink-0 overflow-y-auto border-r border-line bg-panel/60 p-3">
+    <aside
+      style={{ width }}
+      className="shrink-0 overflow-y-auto border-r border-line bg-panel/60 p-3"
+    >
       <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-mute">
         状态
       </div>

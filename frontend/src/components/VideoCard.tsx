@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../api/client";
 import type { VideoAsset } from "../api/types";
 import { coverUrl } from "../api/urls";
 import { formatCount, formatDuration, platformLabel } from "../lib/format";
+import { useAssetsStore } from "../stores/assetsStore";
+import { useTaskStore } from "../stores/taskStore";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusBadge } from "./StatusBadge";
 
@@ -16,9 +19,25 @@ interface Props {
 }
 
 export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props) {
+  const analyzeSelected = useAssetsStore((s) => s.analyzeSelected);
+  const updateStatus = useAssetsStore((s) => s.updateStatus);
+  const removeAsset = useAssetsStore((s) => s.removeAsset);
+  const setTaskOpen = useTaskStore((s) => s.setOpen);
   const cover = coverUrl(asset.cover_path);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // 菜单打开后按实际尺寸修正位置，避免超出窗口边缘。
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    if (rect.bottom > window.innerHeight) {
+      menuRef.current.style.top = `${Math.max(8, window.innerHeight - rect.height - 8)}px`;
+    }
+    if (rect.right > window.innerWidth) {
+      menuRef.current.style.left = `${Math.max(8, window.innerWidth - rect.width - 8)}px`;
+    }
+  }, [menu]);
 
   useEffect(() => {
     if (!menu) return;
@@ -50,6 +69,48 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
     setMenu(null);
     try {
       await api.revealInFolder(asset.file_path);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleAnalyze = async () => {
+    setMenu(null);
+    try {
+      await analyzeSelected([asset.id]);
+      setTaskOpen(true);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleGenerateCopy = async () => {
+    setMenu(null);
+    try {
+      await api.generateCopy(asset.id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleEliminate = async () => {
+    setMenu(null);
+    try {
+      await updateStatus(asset.id, "ELIMINATED");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleDelete = async () => {
+    setMenu(null);
+    const ok = await ask(`确定删除视频 #${asset.id}？本地文件与封面将一并删除。`, {
+      title: "删除确认",
+      kind: "warning",
+    });
+    if (!ok) return;
+    try {
+      await removeAsset(asset.id);
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
     }
@@ -148,17 +209,44 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
           <div
             ref={menuRef}
             onContextMenu={(e) => e.preventDefault()}
-            className="fixed z-50 w-36 rounded-lg border border-line bg-panel p-1 shadow-2xl shadow-black/50"
+            className="fixed z-50 w-40 rounded-lg border border-line bg-panel p-1 shadow-2xl shadow-black/50"
             style={{
               left: Math.min(menu.x, window.innerWidth - 150),
-              top: Math.min(menu.y, window.innerHeight - 72),
+              top: Math.min(menu.y, window.innerHeight - 190),
             }}
           >
             <button
               onClick={() => void handleOpenPath()}
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-paper/90 transition-colors hover:bg-accent/15 hover:text-accent"
             >
-              📁 打开路径
+              打开路径
+            </button>
+            <button
+              onClick={() => void handleAnalyze()}
+              disabled={asset.status === "ANALYZING"}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-paper/90 transition-colors hover:bg-accent/15 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              分析视频
+            </button>
+            <button
+              onClick={() => void handleGenerateCopy()}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-paper/90 transition-colors hover:bg-accent/15 hover:text-accent"
+            >
+              生成文案
+            </button>
+            <button
+              onClick={() => void handleEliminate()}
+              disabled={asset.status === "ELIMINATED" || asset.status === "PUBLISHED"}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-paper/90 transition-colors hover:bg-accent/15 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              淘汰
+            </button>
+            <div className="my-1 border-t border-line" />
+            <button
+              onClick={() => void handleDelete()}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-bad transition-colors hover:bg-bad/10"
+            >
+              删除
             </button>
           </div>,
           document.body,
