@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use build_douyin_acount_lib::db::Database;
 use build_douyin_acount_lib::settings::{AppSettings, SettingsRepo};
 
@@ -52,6 +54,7 @@ fn settings_roundtrip_persists_fields() {
         max_likes: 500_000,
         hit_conditions: vec!["宠物".to_string(), "风景".to_string()],
         exclude_conditions: vec!["色情".to_string()],
+        condition_basis: HashMap::new(),
     };
     repo.save(&custom).expect("save");
 
@@ -71,4 +74,5 @@ fn settings_load_legacy_json_without_conditions_keeps_defaults() {
     assert_eq!(loaded.quality_min_keep, 60, "existing field kept");
     assert!(loaded.hit_conditions.is_empty(), "missing field defaults to empty");
     assert!(loaded.exclude_conditions.is_empty(), "missing field defaults to empty");
+    assert!(loaded.condition_basis.is_empty(), "missing field defaults to empty");
 }

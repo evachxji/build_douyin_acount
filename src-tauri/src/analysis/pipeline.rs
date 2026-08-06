@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::domain::analysis::NewAnalysis;
-use crate::domain::error::DomainError;
 use crate::analysis::llm::resolve_conditions;
+use crate::domain::analysis::{ConditionBasis, NewAnalysis};
+use crate::domain::error::DomainError;
 
 /// 单帧分析结论。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -20,8 +21,8 @@ pub struct SynthesisRequest {
     pub asr_text: Option<String>,
     pub asr_language: Option<String>,
     pub title: Option<String>,
-    pub hit_conditions: Vec<String>,
-    pub exclude_conditions: Vec<String>,
+    /// 需要本阶段判定的条件（绝对编号, 条件原文），编号与完整清单顺序一致。
+    pub conditions: Vec<(usize, String)>,
 }
 
 /// 帧提取能力。
@@ -41,9 +42,22 @@ pub trait Vision: Send + Sync {
 /// LLM 综合能力。
 pub trait Llm: Send + Sync {
     fn synthesize(&self, req: SynthesisRequest) -> Result<crate::analysis::llm::AnalysisJson, DomainError>;
+    /// 仅依据标题与音频转写判定一组条件（阶段1：音频类排除条件预检）。
+    fn judge_conditions(
+        &self,
+        title: Option<&str>,
+        asr_text: &str,
+        asr_language: Option<&str>,
+        items: &[(usize, String)],
+    ) -> Result<Vec<crate::analysis::llm::IndexVerdict>, DomainError>;
+    /// 自动判断每个筛选条件的判定依据（画面/音频/不限）。
+    fn classify_condition_bases(
+        &self,
+        conditions: &[String],
+    ) -> Result<HashMap<String, ConditionBasis>, DomainError>;
 }
 
-/// 分析管线编排：抽帧 -> ASR -> Vision -> LLM 综合。
+/// 分析管线编排：ASR（音频类排除预检）-> 抽帧 -> Vision -> LLM 综合。
 pub struct AnalysisPipeline {
     frames: Arc<dyn FrameExtractor>,
     asr: Arc<dyn super::Asr>,
@@ -66,7 +80,16 @@ impl AnalysisPipeline {
         }
     }
 
+    /// 自动判断条件判定依据（供 Vision Agent 惰性分类后持久化）。
+    pub fn classify_condition_bases(
+        &self,
+        conditions: &[String],
+    ) -> Result<HashMap<String, ConditionBasis>, DomainError> {
+        self.llm.classify_condition_bases(conditions)
+    }
+
     /// 对视频执行完整分析，返回可入库的分析结果。
+    #[allow(clippy::too_many_arguments)]
     pub fn analyze(
         &self,
         video: &Path,
@@ -75,14 +98,12 @@ impl AnalysisPipeline {
         title: Option<&str>,
         hit_conditions: &[String],
         exclude_conditions: &[String],
+        condition_basis: &HashMap<String, ConditionBasis>,
     ) -> Result<NewAnalysis, DomainError> {
         if !video.is_file() {
             return Err(DomainError::InvalidData(format!("video not found: {}", video.display())));
         }
-        let frames_dir = work_dir.join("frames");
         let audio_dir = work_dir.join("audio");
-        let frame_paths = self.frames.extract(video, &frames_dir)?;
-
         // 音频提取失败不阻塞分析（静音/无音轨视频继续走视觉路径）。
         let audio = match self.frames.extract_audio(video, &audio_dir) {
             Ok(a) => Some(a),
@@ -102,18 +123,80 @@ impl AnalysisPipeline {
             None => None,
         };
 
+        // 完整编号顺序：音频类排除 -> 其余排除 -> 命中条件。
+        let audio_excludes: Vec<String> = exclude_conditions
+            .iter()
+            .filter(|c| condition_basis.get(*c) == Some(&ConditionBasis::Audio))
+            .cloned()
+            .collect();
+        let other_excludes: Vec<String> = exclude_conditions
+            .iter()
+            .filter(|c| !audio_excludes.contains(c))
+            .cloned()
+            .collect();
+        let ordered_names: Vec<String> = audio_excludes
+            .iter()
+            .chain(other_excludes.iter())
+            .chain(hit_conditions.iter())
+            .cloned()
+            .collect();
+
+        // 阶段1：音频类排除条件预检（只依赖标题+ASR；任一命中即早退，跳过抽帧/视觉）。
+        let mut audio_verdicts = Vec::new();
+        if let Some(t) = &transcript {
+            if !t.text.trim().is_empty() && !audio_excludes.is_empty() {
+                let items: Vec<(usize, String)> = audio_excludes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| (i + 1, c.clone()))
+                    .collect();
+                let raw = self
+                    .llm
+                    .judge_conditions(title, &t.text, Some(&t.language), &items)?;
+                audio_verdicts = resolve_conditions(&raw, &audio_excludes);
+                if audio_verdicts.iter().any(|v| v.hit) {
+                    return Ok(NewAnalysis {
+                        asset_id,
+                        category: None,
+                        tags: Vec::new(),
+                        quality_score: None,
+                        has_foreign_language: false,
+                        has_large_amount_english_subtitle: false,
+                        summary: None,
+                        recommended_caption: None,
+                        asr_text: Some(t.text.clone()),
+                        asr_language: Some(t.language.clone()),
+                        frame_paths: Vec::new(),
+                        model_name: None,
+                        prompt_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                        condition_results: audio_verdicts,
+                    });
+                }
+            }
+        }
+
+        // 阶段2：抽帧 + 逐帧视觉 + LLM 综合（判定其余排除条件与命中条件）。
+        let frames_dir = work_dir.join("frames");
+        let frame_paths = self.frames.extract(video, &frames_dir)?;
         let mut insights = Vec::with_capacity(frame_paths.len());
         for p in &frame_paths {
             insights.push(self.vision.analyze_frame(p)?);
         }
+        let other_items: Vec<(usize, String)> = ordered_names
+            .iter()
+            .enumerate()
+            .skip(audio_excludes.len())
+            .map(|(i, c)| (i + 1, c.clone()))
+            .collect();
         let json = self.llm.synthesize(SynthesisRequest {
             frames: insights,
             asr_text: transcript.as_ref().map(|t| t.text.clone()),
             asr_language: transcript.as_ref().map(|t| t.language.clone()),
             title: title.map(|s| s.to_string()),
-            hit_conditions: hit_conditions.to_vec(),
-            exclude_conditions: exclude_conditions.to_vec(),
+            conditions: other_items,
         })?;
+        let mut condition_results = audio_verdicts;
+        condition_results.extend(resolve_conditions(&json.conditions, &ordered_names));
         Ok(NewAnalysis {
             asset_id,
             category: Some(json.category),
@@ -131,11 +214,7 @@ impl AnalysisPipeline {
                 .collect(),
             model_name: None,
             prompt_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            condition_results: resolve_conditions(
-                &json.conditions,
-                hit_conditions,
-                exclude_conditions,
-            ),
+            condition_results,
         })
     }
 }

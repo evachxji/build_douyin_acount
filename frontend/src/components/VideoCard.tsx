@@ -14,11 +14,19 @@ interface Props {
   asset: VideoAsset;
   selected: boolean;
   focused: boolean;
+  highlighted: boolean;
   onFocus: () => void;
   onToggle: () => void;
 }
 
-export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props) {
+export function VideoCard({
+  asset,
+  selected,
+  focused,
+  highlighted,
+  onFocus,
+  onToggle,
+}: Props) {
   const analyzeSelected = useAssetsStore((s) => s.analyzeSelected);
   const updateStatus = useAssetsStore((s) => s.updateStatus);
   const removeAsset = useAssetsStore((s) => s.removeAsset);
@@ -129,7 +137,7 @@ export function VideoCard({ asset, selected, focused, onFocus, onToggle }: Props
       }}
       className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-panel transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/40 ${
         focused ? "border-accent/70" : selected ? "border-accent/50" : "border-line hover:border-accent/40"
-      }`}
+      } ${highlighted ? "ring-2 ring-accent shadow-lg shadow-accent/40" : ""}`}
     >
       <div className="relative aspect-video shrink-0 overflow-hidden bg-panel2">
         {cover ? (

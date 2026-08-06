@@ -13,6 +13,7 @@ const EMPTY: AppSettings = {
   quality_min_keep: 60,
   hit_conditions: [],
   exclude_conditions: [],
+  condition_basis: {},
   node_bin: "node",
   publisher_script: "",
   publisher_browser: "chrome",
@@ -224,18 +225,14 @@ export function SettingsDrawer({
             <input className={field} value={settings.ytdlp_path} onChange={(e) => set({ ytdlp_path: e.target.value })} />
           </label>
           <label className="block">
-            <span className="text-xs text-mute">默认文案风格</span>
-            <select
-              className={field}
+            <span className="text-xs text-mute">文案风格 Prompt</span>
+            <textarea
+              rows={3}
               value={settings.account_style}
               onChange={(e) => set({ account_style: e.target.value })}
-            >
-              {["搞笑", "治愈", "高级感", "情绪价值"].map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+              placeholder="例如：用轻松幽默的口吻，加入网络热梗和夸张语气"
+              className="w-full resize-y rounded border border-line bg-ink px-2 py-1.5 text-sm text-paper focus:border-accent/60 focus:outline-none"
+            />
           </label>
           <p className="text-[11px] leading-relaxed text-mute">
             采集配额与 yt-dlp 路径保存后，下一次采集立即生效。

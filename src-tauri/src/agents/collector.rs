@@ -241,9 +241,22 @@ impl Agent for CollectorAgent {
                 if dir.is_dir() {
                     let _ = std::fs::remove_dir_all(&dir);
                 }
+                // 附带首条导入视频信息，供任务面板展示采集结果。
+                let first_asset = enqueued
+                    .first()
+                    .and_then(|id| AssetsRepo::new(ctx.db).get(*id).ok().flatten())
+                    .map(|a| {
+                        json!({
+                            "title": a.title,
+                            "author": a.author,
+                            "likes": a.likes,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
                 Ok(AgentOutcome::Succeeded(json!({
                     "imported": enqueued.len(),
                     "enqueued_analysis": enqueued.len(),
+                    "first_asset": first_asset,
                 })))
             }
             CollectorState::Cancelled => Err(DomainError::InvalidData("采集已取消。".to_string())),

@@ -50,6 +50,17 @@ pub struct ConditionVerdict {
     pub basis: String,
 }
 
+/// 筛选条件的判定依据（由 LLM 自动分类，也可由用户手工指定）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConditionBasis {
+    #[serde(rename = "画面")]
+    Visual,
+    #[serde(rename = "音频")]
+    Audio,
+    #[serde(rename = "不限")]
+    Any,
+}
+
 /// 英文/质量过滤判定结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -109,9 +109,8 @@ fn parse_analysis_json_tolerates_invalid_conditions() {
 
 #[test]
 fn resolve_conditions_maps_index_to_configured_name() {
-    let hits = vec!["宠物".to_string(), "生活".to_string()];
-    let excludes = vec!["色情".to_string()];
-    // 编号顺序：先排除后命中 -> 1=色情, 2=宠物, 3=生活
+    // 完整编号顺序：音频排除 -> 其他排除 -> 命中（此处 1=色情, 2=宠物, 3=生活）
+    let names = vec!["色情".to_string(), "宠物".to_string(), "生活".to_string()];
     let raw = vec![
         build_douyin_acount_lib::analysis::llm::IndexVerdict {
             index: 1,
@@ -139,7 +138,7 @@ fn resolve_conditions_maps_index_to_configured_name() {
             basis: "x".to_string(),
         },
     ];
-    let resolved = build_douyin_acount_lib::analysis::llm::resolve_conditions(&raw, &hits, &excludes);
+    let resolved = build_douyin_acount_lib::analysis::llm::resolve_conditions(&raw, &names);
     assert_eq!(resolved.len(), 2);
     assert_eq!(
         resolved[0],
@@ -212,7 +211,11 @@ impl Vision for FakeVision {
     }
 }
 
-struct FakeLlm;
+#[derive(Default)]
+struct FakeLlm {
+    judge_hits: Vec<usize>,
+}
+
 impl Llm for FakeLlm {
     fn synthesize(&self, req: SynthesisRequest) -> Result<AnalysisJson, DomainError> {
         Ok(AnalysisJson {
@@ -224,17 +227,39 @@ impl Llm for FakeLlm {
             summary: req.frames.first().map(|f| f.description.clone()).unwrap_or_default(),
             recommended_caption: "测试文案".to_string(),
             conditions: req
-                .exclude_conditions
+                .conditions
                 .iter()
-                .chain(req.hit_conditions.iter())
-                .enumerate()
                 .map(|(i, _)| build_douyin_acount_lib::analysis::llm::IndexVerdict {
-                    index: i + 1,
+                    index: *i,
                     hit: true,
                     basis: "画面".to_string(),
                 })
                 .collect(),
         })
+    }
+
+    fn judge_conditions(
+        &self,
+        _title: Option<&str>,
+        _asr_text: &str,
+        _asr_language: Option<&str>,
+        items: &[(usize, String)],
+    ) -> Result<Vec<build_douyin_acount_lib::analysis::llm::IndexVerdict>, DomainError> {
+        Ok(items
+            .iter()
+            .map(|(i, _)| build_douyin_acount_lib::analysis::llm::IndexVerdict {
+                index: *i,
+                hit: self.judge_hits.contains(i),
+                basis: String::new(),
+            })
+            .collect())
+    }
+
+    fn classify_condition_bases(
+        &self,
+        _conditions: &[String],
+    ) -> Result<std::collections::HashMap<String, build_douyin_acount_lib::domain::analysis::ConditionBasis>, DomainError> {
+        Ok(std::collections::HashMap::new())
     }
 }
 
@@ -250,10 +275,18 @@ fn pipeline_orchestrates_frames_asr_vision_llm_into_analysis() {
         Arc::new(FakeExtractor),
         Arc::new(FakeAsr),
         Arc::new(FakeVision),
-        Arc::new(FakeLlm),
+        Arc::new(FakeLlm::default()),
     );
     let result: NewAnalysis = pipeline
-        .analyze(&video, &work, 42, None, &["宠物".to_string()], &[])
+        .analyze(
+            &video,
+            &work,
+            42,
+            None,
+            &["宠物".to_string()],
+            &[],
+            &std::collections::HashMap::new(),
+        )
         .expect("analyze");
     assert_eq!(result.category.as_deref(), Some("宠物"));
     assert_eq!(result.asr_text.as_deref(), Some("hello world"));
@@ -262,6 +295,73 @@ fn pipeline_orchestrates_frames_asr_vision_llm_into_analysis() {
     assert_eq!(result.condition_results.len(), 1);
     assert_eq!(result.condition_results[0].name, "宠物");
     assert!(result.condition_results[0].hit);
+}
+
+#[test]
+fn pipeline_audio_exclude_hit_skips_vision_and_full_analysis() {
+    use std::collections::HashMap;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let video = dir.path().join("v.mp4");
+    std::fs::write(&video, b"fake").expect("write");
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).expect("workdir");
+    let basis = HashMap::from([(
+        "长英文对话".to_string(),
+        build_douyin_acount_lib::domain::analysis::ConditionBasis::Audio,
+    )]);
+    let pipeline = AnalysisPipeline::new(
+        Arc::new(FakeExtractor),
+        Arc::new(FakeAsr),
+        Arc::new(FakeVision),
+        Arc::new(FakeLlm { judge_hits: vec![1] }),
+    );
+    let result: NewAnalysis = pipeline
+        .analyze(&video, &work, 42, None, &[], &["长英文对话".to_string()], &basis)
+        .expect("analyze");
+    assert_eq!(result.category, None, "音频排除命中时不做完整分析");
+    assert!(result.frame_paths.is_empty(), "未抽帧");
+    assert_eq!(result.condition_results.len(), 1);
+    assert_eq!(result.condition_results[0].name, "长英文对话");
+    assert!(result.condition_results[0].hit);
+}
+
+#[test]
+fn pipeline_merges_audio_verdicts_into_full_analysis_when_not_hit() {
+    use std::collections::HashMap;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let video = dir.path().join("v.mp4");
+    std::fs::write(&video, b"fake").expect("write");
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).expect("workdir");
+    let basis = HashMap::from([(
+        "长英文对话".to_string(),
+        build_douyin_acount_lib::domain::analysis::ConditionBasis::Audio,
+    )]);
+    let pipeline = AnalysisPipeline::new(
+        Arc::new(FakeExtractor),
+        Arc::new(FakeAsr),
+        Arc::new(FakeVision),
+        Arc::new(FakeLlm::default()),
+    );
+    let result: NewAnalysis = pipeline
+        .analyze(
+            &video,
+            &work,
+            42,
+            None,
+            &["宠物".to_string()],
+            &["长英文对话".to_string()],
+            &basis,
+        )
+        .expect("analyze");
+    assert_eq!(result.category.as_deref(), Some("宠物"));
+    assert_eq!(result.condition_results.len(), 2, "音频判定(未命中) + 命中判定合并");
+    assert_eq!(result.condition_results[0].name, "长英文对话");
+    assert!(!result.condition_results[0].hit);
+    assert_eq!(result.condition_results[1].name, "宠物");
+    assert!(result.condition_results[1].hit);
 }
 
 #[test]
@@ -275,9 +375,11 @@ fn pipeline_propagates_extraction_error() {
         Arc::new(AlwaysFailExtractor),
         Arc::new(FakeAsr),
         Arc::new(FakeVision),
-        Arc::new(FakeLlm),
+        Arc::new(FakeLlm::default()),
     );
-    let err = pipeline.analyze(&video, &work, 42, None, &[], &[]).expect_err("must fail");
+    let err = pipeline
+        .analyze(&video, &work, 42, None, &[], &[], &std::collections::HashMap::new())
+        .expect_err("must fail");
     assert!(err.to_string().contains("extract failed"), "got: {err}");
 }
 

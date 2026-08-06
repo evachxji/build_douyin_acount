@@ -63,6 +63,8 @@ impl<'a> AgentRuntime<'a> {
         match outcome {
             Ok(AgentOutcome::Succeeded(output)) => {
                 tasks.add_log(task.id, "INFO", &format!("task succeeded: {output}"))?;
+                // 把执行结果合并进任务 payload，供前端任务面板展示执行结果。
+                let _ = tasks.update_payload(task.id, output);
                 tasks.succeed(task.id)?;
             }
             Ok(AgentOutcome::WaitingForHuman(ctx_data)) => {

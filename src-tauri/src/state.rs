@@ -85,6 +85,7 @@ impl AppState {
                 quality_min_keep: s.quality_min_keep,
                 hit_conditions: s.hit_conditions.clone(),
                 exclude_conditions: s.exclude_conditions.clone(),
+                condition_basis: s.condition_basis.clone(),
             }
         };
         let (node_bin, script, collector_script, ytdlp) = {

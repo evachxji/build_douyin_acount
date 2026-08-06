@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
-use crate::domain::analysis::ConditionVerdict;
+use crate::domain::analysis::{ConditionBasis, ConditionVerdict};
 use crate::domain::error::DomainError;
 
 use super::pipeline::{FrameInsight, SynthesisRequest};
@@ -96,25 +98,16 @@ pub fn parse_analysis_json(raw: &str) -> Result<AnalysisJson, DomainError> {
     })
 }
 
-/// 把模型按编号输出的判定映射回配置条件原文（编号 1..=N：先排除条件后命中条件）。
+/// 把模型按编号输出的判定映射回 `names`（调用方给定的完整编号顺序）。
 /// 编号越界、重复编号、空条件名一律跳过，保证与设置列表精确对应。
-pub fn resolve_conditions(
-    raw: &[IndexVerdict],
-    hit_conditions: &[String],
-    exclude_conditions: &[String],
-) -> Vec<ConditionVerdict> {
-    let names: Vec<&str> = exclude_conditions
-        .iter()
-        .chain(hit_conditions.iter())
-        .map(|s| s.as_str())
-        .collect();
+pub fn resolve_conditions(raw: &[IndexVerdict], names: &[String]) -> Vec<ConditionVerdict> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for v in raw {
         if v.index == 0 || v.index > names.len() || !seen.insert(v.index) {
             continue;
         }
-        let name = names[v.index - 1];
+        let name = names[v.index - 1].as_str();
         if name.trim().is_empty() {
             continue;
         }
@@ -125,6 +118,79 @@ pub fn resolve_conditions(
         });
     }
     out
+}
+
+/// 解析模型返回的 `{"conditions": [{"index":..,"hit":..}]}` 为编号判定列表（容错）。
+fn parse_index_verdicts(raw: &str) -> Result<Vec<IndexVerdict>, DomainError> {
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|e| DomainError::InvalidData(format!("judge json invalid: {e}")))?;
+    let arr = value
+        .get("conditions")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| DomainError::InvalidData("judge json missing conditions".to_string()))?;
+    Ok(arr
+        .iter()
+        .filter_map(|c| {
+            Some(IndexVerdict {
+                index: c.get("index")?.as_u64()? as usize,
+                hit: c.get("hit").and_then(|v| v.as_bool()).unwrap_or(false),
+                basis: String::new(),
+            })
+        })
+        .collect())
+}
+
+/// 让 LLM 自动判断每个筛选条件主要依据「画面 / 音频 / 不限」哪种内容判定。
+pub fn classify_condition_bases(
+    client: &AiClient,
+    model: &str,
+    conditions: &[String],
+) -> Result<HashMap<String, ConditionBasis>, DomainError> {
+    if conditions.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let list = conditions
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{}. {c}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let user = format!(
+        "以下是短视频筛选条件清单：\n{list}\n\n请判断每一条条件主要依据哪种内容判断是否命中：\n「画面」：只能或主要靠视频画面判断（如 色情、大量英文字幕、宠物、风景）\n「音频」：只能或主要靠语音/转写判断（如 长中文对话、长英文对话、旁白解说）\n「不限」：画面或音频都可以判断（如 搞笑、治愈）\n输出严格 JSON：{{\"conditions\": [{{\"index\": 编号, \"basis\": \"画面|音频|不限\"}}]}}"
+    );
+    let system = "你是一个内容筛选条件分类助手。只输出 JSON，不要输出其他文字。";
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
+    let raw = rt.block_on(async {
+        client
+            .chat(
+                model,
+                vec![super::ChatMessage::system(system), super::ChatMessage::user(user)],
+                Some("json"),
+            )
+            .await
+    })?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| DomainError::InvalidData(format!("classify json invalid: {e}")))?;
+    let mut out = HashMap::new();
+    for c in value.get("conditions").and_then(|v| v.as_array()).into_iter().flatten() {
+        let (Some(index), Some(basis)) = (
+            c.get("index").and_then(|v| v.as_u64()),
+            c.get("basis").and_then(|v| v.as_str()),
+        ) else {
+            continue;
+        };
+        let name = conditions.get(index as usize - 1);
+        let basis = match basis {
+            "画面" => ConditionBasis::Visual,
+            "音频" => ConditionBasis::Audio,
+            _ => ConditionBasis::Any,
+        };
+        if let Some(name) = name {
+            out.insert(name.clone(), basis);
+        }
+    }
+    Ok(out)
 }
 
 /// 基于 Ollama 的 LLM 综合实现。
@@ -149,20 +215,14 @@ impl super::pipeline::Llm for OllamaLlm {
             .filter(|t| !t.is_empty())
             .unwrap_or("（无对白/音频转写为空）");
         let mut filter_lines = Vec::new();
-        let mut idx = 0usize;
-        for c in &req.exclude_conditions {
-            idx += 1;
-            filter_lines.push(format!("{idx}. 排除条件：{c}"));
-        }
-        for c in &req.hit_conditions {
-            idx += 1;
-            filter_lines.push(format!("{idx}. 命中条件：{c}"));
+        for (i, c) in &req.conditions {
+            filter_lines.push(format!("{i}. {c}"));
         }
         let filter_section = if filter_lines.is_empty() {
             String::new()
         } else {
             format!(
-                "\n\n筛选要求（先逐条判定排除条件：若任一排除条件命中，则无需再判定命中条件，输出已判定条目即可；若排除条件全部未命中，再逐条判定全部命中条件。conditions 中每条 index 必须与编号一致）：\n{}",
+                "\n\n筛选要求（按编号逐条判定；conditions 中每条 index 必须与编号一致）：\n{}",
                 filter_lines.join("\n")
             )
         };
@@ -184,6 +244,46 @@ impl super::pipeline::Llm for OllamaLlm {
                 .await
         })?;
         parse_analysis_json(&raw)
+    }
+
+    fn judge_conditions(
+        &self,
+        title: Option<&str>,
+        asr_text: &str,
+        asr_language: Option<&str>,
+        items: &[(usize, String)],
+    ) -> Result<Vec<IndexVerdict>, DomainError> {
+        let lines = items
+            .iter()
+            .map(|(i, n)| format!("{i}. {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let user = format!(
+            "视频标题：{}\n音频转写（语言：{}）：\n{}\n\n请仅依据上述标题与音频转写逐条判定以下条件是否命中（不要推测画面内容）：\n{lines}\n\n输出严格 JSON：{{\"conditions\": [{{\"index\": 编号, \"hit\": true或false}}]}}",
+            title.unwrap_or("未知"),
+            asr_language.unwrap_or("unknown"),
+            asr_text
+        );
+        let system = "你是一个短视频内容筛选助手。只输出 JSON，不要输出其他文字。";
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
+        let raw = rt.block_on(async {
+            self.client
+                .chat(
+                    &self.model,
+                    vec![super::ChatMessage::system(system), super::ChatMessage::user(user)],
+                    Some("json"),
+                )
+                .await
+        })?;
+        parse_index_verdicts(&raw)
+    }
+
+    fn classify_condition_bases(
+        &self,
+        conditions: &[String],
+    ) -> Result<HashMap<String, ConditionBasis>, DomainError> {
+        classify_condition_bases(&self.client, &self.model, conditions)
     }
 }
 

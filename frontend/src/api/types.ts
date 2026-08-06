@@ -105,6 +105,7 @@ export interface AppSettings {
   quality_min_keep: number;
   hit_conditions: string[];
   exclude_conditions: string[];
+  condition_basis: Record<string, "画面" | "音频" | "不限">;
   node_bin: string;
   publisher_script: string;
   publisher_browser: string;

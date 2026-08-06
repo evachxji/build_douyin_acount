@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::agents::{Agent, AgentContext, AgentOutcome};
 use crate::db::repos::analyses::AnalysesRepo;
 use crate::db::repos::assets::AssetsRepo;
-use crate::domain::analysis::{FilterVerdict, NewAnalysis};
+use crate::domain::analysis::{ConditionBasis, FilterVerdict, NewAnalysis};
 use crate::domain::asset::AssetStatus;
 use crate::domain::error::DomainError;
 use crate::domain::task::AgentTask;
@@ -15,6 +17,8 @@ pub struct FilterRules {
     pub hit_conditions: Vec<String>,
     /// 排除条件：任一命中即淘汰；空 = 不限制。
     pub exclude_conditions: Vec<String>,
+    /// 每个条件的判定依据（条件名 -> 画面/音频/不限），供分析管线分阶段判定。
+    pub condition_basis: HashMap<String, ConditionBasis>,
 }
 
 impl Default for FilterRules {
@@ -23,6 +27,7 @@ impl Default for FilterRules {
             quality_min_keep: 60,
             hit_conditions: Vec::new(),
             exclude_conditions: Vec::new(),
+            condition_basis: HashMap::new(),
         }
     }
 }

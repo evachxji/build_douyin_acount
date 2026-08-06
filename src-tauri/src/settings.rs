@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::db::Database;
+use crate::domain::analysis::ConditionBasis;
 use crate::domain::error::DomainError;
 
 /// AI / 过滤 / 存储等应用级配置。集中在此，GUI 可读可改并持久化到 app_settings 表。
@@ -34,6 +37,9 @@ pub struct AppSettings {
     /// 排除条件：任一命中即淘汰（空 = 不限制）。
     #[serde(default)]
     pub exclude_conditions: Vec<String>,
+    /// 每个条件的判定依据（条件名 -> 画面/音频/不限），由 LLM 自动分类或用户手工指定。
+    #[serde(default)]
+    pub condition_basis: HashMap<String, ConditionBasis>,
 }
 
 impl Default for AppSettings {
@@ -58,6 +64,7 @@ impl Default for AppSettings {
             max_likes: 1_000_000,
             hit_conditions: Vec::new(),
             exclude_conditions: Vec::new(),
+            condition_basis: HashMap::new(),
         }
     }
 }

@@ -27,6 +27,26 @@ export function Waterfall() {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [highlightId, setHighlightId] = useState<number | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 任务队列双击定位：滚动到对应卡片并高亮 3 秒。
+  useEffect(() => {
+    const onFocusRequest = (e: Event) => {
+      const id = Number((e as CustomEvent).detail);
+      if (!Number.isInteger(id)) return;
+      const el = gridRef.current?.querySelector<HTMLElement>(`[data-asset-id="${id}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightId(id);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => setHighlightId(null), 3000);
+    };
+    window.addEventListener("asset-focus", onFocusRequest);
+    return () => {
+      window.removeEventListener("asset-focus", onFocusRequest);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
 
   // 框选结束：按矩形相交关系计算命中的卡片，Ctrl 按下时为追加，否则替换选择集。
   const finishDrag = (sx: number, sy: number, cx: number, cy: number, additive: boolean) => {
@@ -154,6 +174,7 @@ export function Waterfall() {
                 asset={asset}
                 selected={ids.has(asset.id)}
                 focused={focusId === asset.id}
+                highlighted={highlightId === asset.id}
                 onFocus={() => focus(asset.id)}
                 onToggle={() => toggle(asset.id)}
               />

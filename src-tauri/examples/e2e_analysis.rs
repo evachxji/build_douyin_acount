@@ -65,7 +65,7 @@ fn main() {
 
     let work = std::env::temp_dir().join(format!("e2e_analysis_{}", std::process::id()));
     let analysis = pipeline
-        .analyze(&video, &work, 0, Some("E2E 测试视频"), &[], &[])
+        .analyze(&video, &work, 0, Some("E2E 测试视频"), &[], &[], &std::collections::HashMap::new())
         .expect("analyze");
     let decision = FilterAgent::evaluate(&analysis, &Default::default()).expect("filter");
     let verdict = decision.verdict;

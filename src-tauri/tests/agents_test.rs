@@ -303,6 +303,26 @@ impl Llm for FakeLlm {
             conditions: vec![],
         })
     }
+
+    fn judge_conditions(
+        &self,
+        _title: Option<&str>,
+        _asr_text: &str,
+        _asr_language: Option<&str>,
+        _items: &[(usize, String)],
+    ) -> Result<Vec<build_douyin_acount_lib::analysis::llm::IndexVerdict>, DomainError> {
+        Ok(Vec::new())
+    }
+
+    fn classify_condition_bases(
+        &self,
+        _conditions: &[String],
+    ) -> Result<
+        std::collections::HashMap<String, build_douyin_acount_lib::domain::analysis::ConditionBasis>,
+        DomainError,
+    > {
+        Ok(std::collections::HashMap::new())
+    }
 }
 
 #[test]

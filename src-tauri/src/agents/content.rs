@@ -111,17 +111,20 @@ impl Agent for ContentAgent {
         let asset_id = task.payload["asset_id"]
             .as_i64()
             .ok_or_else(|| DomainError::InvalidData("payload missing asset_id".to_string()))?;
-        let style_name = task.payload["style"].as_str().unwrap_or("治愈");
-        let style = StylesRepo::new(ctx.db)
-            .get_by_name(style_name)?
-            .ok_or_else(|| DomainError::InvalidData(format!("未知账号风格：{style_name}")))?;
+        // 兼容内置风格名（治愈/搞笑等）；否则把设置里的文本直接当作自定义 prompt。
+        let style_name = task.payload["style"].as_str().map(str::trim).unwrap_or("");
+        let style = StylesRepo::new(ctx.db).get_by_name(style_name)?;
+        let tone_prompt = style
+            .as_ref()
+            .map(|s| s.tone_prompt.clone())
+            .unwrap_or_else(|| style_name.to_string());
 
         let context = analysis_context(asset_id, ctx)?;
-        let raw = self.llm.generate_copy(&style.tone_prompt, &context)?;
+        let raw = self.llm.generate_copy(&tone_prompt, &context)?;
         let (title, body, hashtags) = parse_copy(&raw)?;
         ContentRepo::new(ctx.db).upsert(NewContentCopy {
             asset_id,
-            style_id: Some(style.id),
+            style_id: style.map(|s| s.id),
             title,
             body,
             hashtags,
