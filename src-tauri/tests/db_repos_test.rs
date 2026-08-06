@@ -59,6 +59,45 @@ fn migrations_create_all_tables() {
 }
 
 #[test]
+fn legacy_db_gets_condition_results_column() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("legacy.db");
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "CREATE TABLE analysis_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                asset_id INTEGER NOT NULL UNIQUE,
+                category TEXT,
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                quality_score INTEGER,
+                has_foreign_language INTEGER NOT NULL DEFAULT 0,
+                has_large_amount_english_subtitle INTEGER NOT NULL DEFAULT 0,
+                summary TEXT,
+                recommended_caption TEXT,
+                asr_text TEXT,
+                asr_language TEXT,
+                frame_paths_json TEXT NOT NULL DEFAULT '[]',
+                model_name TEXT,
+                prompt_version TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .expect("create legacy table");
+    }
+    let db = Database::open(&path).expect("open upgrades legacy db");
+    let cols: Vec<String> = db
+        .conn()
+        .prepare("PRAGMA table_info(analysis_results)")
+        .expect("pragma")
+        .query_map([], |r| r.get::<_, String>(1))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("collect");
+    assert!(cols.iter().any(|c| c == "condition_results_json"));
+}
+
+#[test]
 fn asset_insert_get_roundtrip() {
     let db = test_db();
     let repo = AssetsRepo::new(&db);
