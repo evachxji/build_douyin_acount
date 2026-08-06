@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::domain::analysis::ConditionVerdict;
 use crate::domain::error::DomainError;
 
 use super::pipeline::{FrameInsight, SynthesisRequest};
@@ -17,6 +18,8 @@ pub struct AnalysisJson {
     pub has_large_amount_english_subtitle: bool,
     pub summary: String,
     pub recommended_caption: String,
+    #[serde(default)]
+    pub conditions: Vec<ConditionVerdict>,
 }
 
 /// 解析并校验 LLM 输出；缺少必要字段时返回明确错误。
@@ -47,6 +50,25 @@ pub fn parse_analysis_json(raw: &str) -> Result<AnalysisJson, DomainError> {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
+    let conditions = value
+        .get("conditions")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| {
+                    let name = c.get("name")?.as_str()?.trim();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(ConditionVerdict {
+                        name: name.to_string(),
+                        hit: c.get("hit").and_then(|v| v.as_bool()).unwrap_or(false),
+                        basis: c.get("basis").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(AnalysisJson {
         category: category.to_string(),
         tags,
@@ -65,6 +87,7 @@ pub fn parse_analysis_json(raw: &str) -> Result<AnalysisJson, DomainError> {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
+        conditions,
     })
 }
 
@@ -89,8 +112,23 @@ impl super::pipeline::Llm for OllamaLlm {
             .map(|t| t.trim())
             .filter(|t| !t.is_empty())
             .unwrap_or("（无对白/音频转写为空）");
+        let mut filter_lines = Vec::new();
+        if !req.hit_conditions.is_empty() {
+            filter_lines.push(format!("命中条件（至少命中其一）：{}", req.hit_conditions.join("、")));
+        }
+        if !req.exclude_conditions.is_empty() {
+            filter_lines.push(format!("排除条件（任一命中即排除）：{}", req.exclude_conditions.join("、")));
+        }
+        let filter_section = if filter_lines.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n\n筛选要求（请逐条判定是否命中，并把每条结果输出到 conditions 字段）：\n{}",
+                filter_lines.join("\n")
+            )
+        };
         let user = format!(
-            "视频元信息：\n标题：{}\n\n关键帧内容：\n{frames_text}\n\n音频转写（语言：{}）：\n{}",
+            "视频元信息：\n标题：{}\n\n关键帧内容：\n{frames_text}\n\n音频转写（语言：{}）：\n{}{filter_section}",
             req.title.as_deref().unwrap_or("未知"),
             req.asr_language.as_deref().unwrap_or("unknown"),
             asr_text

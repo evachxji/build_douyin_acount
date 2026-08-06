@@ -45,6 +45,8 @@ impl Agent for VisionAgent {
                 &work_dir,
                 asset_id,
                 asset.title.as_deref(),
+                &self.rules.hit_conditions,
+                &self.rules.exclude_conditions,
             )?;
         let decision = FilterAgent::evaluate(&analysis, &self.rules)?;
         AnalysesRepo::new(ctx.db).upsert(analysis)?;

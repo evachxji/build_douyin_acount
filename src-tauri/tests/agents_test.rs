@@ -300,6 +300,7 @@ impl Llm for FakeLlm {
             has_large_amount_english_subtitle: false,
             summary: "一只猫在玩耍".to_string(),
             recommended_caption: "治愈猫猫".to_string(),
+            conditions: vec![],
         })
     }
 }

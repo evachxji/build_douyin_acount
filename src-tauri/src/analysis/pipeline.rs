@@ -19,6 +19,8 @@ pub struct SynthesisRequest {
     pub asr_text: Option<String>,
     pub asr_language: Option<String>,
     pub title: Option<String>,
+    pub hit_conditions: Vec<String>,
+    pub exclude_conditions: Vec<String>,
 }
 
 /// 帧提取能力。
@@ -70,6 +72,8 @@ impl AnalysisPipeline {
         work_dir: &Path,
         asset_id: i64,
         title: Option<&str>,
+        hit_conditions: &[String],
+        exclude_conditions: &[String],
     ) -> Result<NewAnalysis, DomainError> {
         if !video.is_file() {
             return Err(DomainError::InvalidData(format!("video not found: {}", video.display())));
@@ -106,6 +110,8 @@ impl AnalysisPipeline {
             asr_text: transcript.as_ref().map(|t| t.text.clone()),
             asr_language: transcript.as_ref().map(|t| t.language.clone()),
             title: title.map(|s| s.to_string()),
+            hit_conditions: hit_conditions.to_vec(),
+            exclude_conditions: exclude_conditions.to_vec(),
         })?;
         Ok(NewAnalysis {
             asset_id,
@@ -124,7 +130,7 @@ impl AnalysisPipeline {
                 .collect(),
             model_name: None,
             prompt_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            condition_results: vec![],
+            condition_results: json.conditions,
         })
     }
 }
