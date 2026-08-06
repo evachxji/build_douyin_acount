@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::domain::analysis::NewAnalysis;
 use crate::domain::error::DomainError;
+use crate::analysis::llm::resolve_conditions;
 
 /// 单帧分析结论。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -130,7 +131,11 @@ impl AnalysisPipeline {
                 .collect(),
             model_name: None,
             prompt_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            condition_results: json.conditions,
+            condition_results: resolve_conditions(
+                &json.conditions,
+                hit_conditions,
+                exclude_conditions,
+            ),
         })
     }
 }

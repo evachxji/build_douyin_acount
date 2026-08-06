@@ -19,7 +19,15 @@ pub struct AnalysisJson {
     pub summary: String,
     pub recommended_caption: String,
     #[serde(default)]
-    pub conditions: Vec<ConditionVerdict>,
+    pub conditions: Vec<IndexVerdict>,
+}
+
+/// 模型按编号输出的条件判定（index 对应筛选要求中的编号）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IndexVerdict {
+    pub index: usize,
+    pub hit: bool,
+    pub basis: String,
 }
 
 /// 解析并校验 LLM 输出；缺少必要字段时返回明确错误。
@@ -56,12 +64,9 @@ pub fn parse_analysis_json(raw: &str) -> Result<AnalysisJson, DomainError> {
         .map(|arr| {
             arr.iter()
                 .filter_map(|c| {
-                    let name = c.get("name")?.as_str()?.trim();
-                    if name.is_empty() {
-                        return None;
-                    }
-                    Some(ConditionVerdict {
-                        name: name.to_string(),
+                    let index = c.get("index")?.as_u64()? as usize;
+                    Some(IndexVerdict {
+                        index,
                         hit: c.get("hit").and_then(|v| v.as_bool()).unwrap_or(false),
                         basis: c.get("basis").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                     })
@@ -91,6 +96,37 @@ pub fn parse_analysis_json(raw: &str) -> Result<AnalysisJson, DomainError> {
     })
 }
 
+/// 把模型按编号输出的判定映射回配置条件原文（编号 1..=N：先命中条件后排除条件）。
+/// 编号越界、重复编号、空条件名一律跳过，保证与设置列表精确对应。
+pub fn resolve_conditions(
+    raw: &[IndexVerdict],
+    hit_conditions: &[String],
+    exclude_conditions: &[String],
+) -> Vec<ConditionVerdict> {
+    let names: Vec<&str> = hit_conditions
+        .iter()
+        .chain(exclude_conditions.iter())
+        .map(|s| s.as_str())
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for v in raw {
+        if v.index == 0 || v.index > names.len() || !seen.insert(v.index) {
+            continue;
+        }
+        let name = names[v.index - 1];
+        if name.trim().is_empty() {
+            continue;
+        }
+        out.push(ConditionVerdict {
+            name: name.to_string(),
+            hit: v.hit,
+            basis: v.basis.clone(),
+        });
+    }
+    out
+}
+
 /// 基于 Ollama 的 LLM 综合实现。
 pub struct OllamaLlm {
     pub client: AiClient,
@@ -113,17 +149,20 @@ impl super::pipeline::Llm for OllamaLlm {
             .filter(|t| !t.is_empty())
             .unwrap_or("（无对白/音频转写为空）");
         let mut filter_lines = Vec::new();
-        if !req.hit_conditions.is_empty() {
-            filter_lines.push(format!("命中条件（至少命中其一）：{}", req.hit_conditions.join("、")));
+        let mut idx = 0usize;
+        for c in &req.hit_conditions {
+            idx += 1;
+            filter_lines.push(format!("{idx}. 命中条件：{c}"));
         }
-        if !req.exclude_conditions.is_empty() {
-            filter_lines.push(format!("排除条件（任一命中即排除）：{}", req.exclude_conditions.join("、")));
+        for c in &req.exclude_conditions {
+            idx += 1;
+            filter_lines.push(format!("{idx}. 排除条件：{c}"));
         }
         let filter_section = if filter_lines.is_empty() {
             String::new()
         } else {
             format!(
-                "\n\n筛选要求（请逐条判定是否命中，并把每条结果输出到 conditions 字段）：\n{}",
+                "\n\n筛选要求（按编号逐条判定，共{idx}条，不得遗漏；conditions 中每条 index 必须与编号一致）：\n{}",
                 filter_lines.join("\n")
             )
         };

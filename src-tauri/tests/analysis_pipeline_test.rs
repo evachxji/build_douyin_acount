@@ -80,15 +80,16 @@ fn parse_analysis_json_parses_conditions() {
         "summary": "一只猫",
         "recommended_caption": "看猫",
         "conditions": [
-            {"name": "宠物", "hit": true, "basis": "画面"},
-            {"name": "长中文对话", "hit": false, "basis": "音频"}
+            {"index": 1, "hit": true, "basis": "画面"},
+            {"index": 6, "hit": false, "basis": "音频"}
         ]
     }"#;
     let parsed = parse_analysis_json(raw).expect("parse");
     assert_eq!(parsed.conditions.len(), 2);
-    assert_eq!(parsed.conditions[0].name, "宠物");
+    assert_eq!(parsed.conditions[0].index, 1);
     assert!(parsed.conditions[0].hit);
     assert_eq!(parsed.conditions[0].basis, "画面");
+    assert_eq!(parsed.conditions[1].index, 6);
     assert!(!parsed.conditions[1].hit);
 }
 
@@ -104,6 +105,57 @@ fn parse_analysis_json_tolerates_invalid_conditions() {
     let raw = r#"{"category":"宠物","tags":[],"quality_score":80,"has_foreign_language":false,"has_large_amount_english_subtitle":false,"summary":"s","recommended_caption":"c","conditions":"not-an-array"}"#;
     let parsed = parse_analysis_json(raw).expect("parse");
     assert!(parsed.conditions.is_empty());
+}
+
+#[test]
+fn resolve_conditions_maps_index_to_configured_name() {
+    let hits = vec!["宠物".to_string(), "生活".to_string()];
+    let excludes = vec!["色情".to_string()];
+    let raw = vec![
+        build_douyin_acount_lib::analysis::llm::IndexVerdict {
+            index: 1,
+            hit: true,
+            basis: "画面".to_string(),
+        },
+        build_douyin_acount_lib::analysis::llm::IndexVerdict {
+            index: 3,
+            hit: true,
+            basis: "画面".to_string(),
+        },
+        build_douyin_acount_lib::analysis::llm::IndexVerdict {
+            index: 3,
+            hit: false,
+            basis: "画面".to_string(),
+        },
+        build_douyin_acount_lib::analysis::llm::IndexVerdict {
+            index: 99,
+            hit: true,
+            basis: "x".to_string(),
+        },
+        build_douyin_acount_lib::analysis::llm::IndexVerdict {
+            index: 0,
+            hit: true,
+            basis: "x".to_string(),
+        },
+    ];
+    let resolved = build_douyin_acount_lib::analysis::llm::resolve_conditions(&raw, &hits, &excludes);
+    assert_eq!(resolved.len(), 2);
+    assert_eq!(
+        resolved[0],
+        build_douyin_acount_lib::domain::analysis::ConditionVerdict {
+            name: "宠物".to_string(),
+            hit: true,
+            basis: "画面".to_string(),
+        }
+    );
+    assert_eq!(
+        resolved[1],
+        build_douyin_acount_lib::domain::analysis::ConditionVerdict {
+            name: "色情".to_string(),
+            hit: true,
+            basis: "画面".to_string(),
+        }
+    );
 }
 
 #[test]
@@ -173,8 +225,9 @@ impl Llm for FakeLlm {
             conditions: req
                 .hit_conditions
                 .iter()
-                .map(|c| build_douyin_acount_lib::domain::analysis::ConditionVerdict {
-                    name: c.clone(),
+                .enumerate()
+                .map(|(i, _)| build_douyin_acount_lib::analysis::llm::IndexVerdict {
+                    index: i + 1,
                     hit: true,
                     basis: "画面".to_string(),
                 })
