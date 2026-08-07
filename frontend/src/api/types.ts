@@ -32,6 +32,7 @@ export interface VideoAsset {
   plays: number;
   duration_ms: number;
   status: AssetStatus;
+  eliminate_reason: string | null;
   category: string | null;
   quality_score: number | null;
   created_at: string;
@@ -147,30 +148,8 @@ export interface ContentCopy {
   created_at: string;
 }
 
-export interface RecommendationItem {
-  asset_id: number;
-  title: string | null;
-  author: string | null;
-  likes: number;
-  quality_score: number | null;
-  score: number;
-  category: string;
-  reason: string | null;
-}
-
-export interface RecommendationGroup {
-  category: string;
-  items: RecommendationItem[];
-}
-
-export interface RecommendationResult {
-  batch_id: string;
-  groups: RecommendationGroup[];
-}
-
 export interface AssetListFilterArg {
-  category?: string;
-  status?: string;
+  statuses?: string[];
   platform?: string;
   search?: string;
   limit?: number;
@@ -178,7 +157,6 @@ export interface AssetListFilterArg {
 }
 
 export interface FilterState {
-  category?: string;
   status?: string;
   platform?: string;
   favorite?: boolean;

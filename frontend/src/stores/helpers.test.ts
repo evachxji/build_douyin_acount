@@ -18,18 +18,21 @@ describe("selectionReducer", () => {
 describe("buildAssetFilter", () => {
   it("drops undefined fields and passes through the rest", () => {
     const filter = buildAssetFilter({
-      category: "宠物",
       status: undefined,
       platform: "instagram",
       search: "cat",
     });
     expect(filter).toEqual({
-      category: "宠物",
       platform: "instagram",
       search: "cat",
       limit: 300,
       offset: 0,
     });
     expect("status" in filter).toBe(false);
+  });
+
+  it("maps 待处理(NEW) to NEW+ANALYZING and other statuses to a single entry", () => {
+    expect(buildAssetFilter({ status: "NEW" }).statuses).toEqual(["NEW", "ANALYZING"]);
+    expect(buildAssetFilter({ status: "CANDIDATE" }).statuses).toEqual(["CANDIDATE"]);
   });
 });

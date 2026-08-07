@@ -30,8 +30,10 @@ export function buildAssetFilter(filter: FilterState): AssetListFilterArg {
     limit: 300,
     offset: 0,
   };
-  if (filter.category) out.category = filter.category;
-  if (filter.status) out.status = filter.status;
+  // 左侧栏不单独展示"分析中"：待处理 = NEW + ANALYZING。
+  if (filter.status) {
+    out.statuses = filter.status === "NEW" ? ["NEW", "ANALYZING"] : [filter.status];
+  }
   if (filter.platform) out.platform = filter.platform;
   if (filter.search?.trim()) out.search = filter.search.trim();
   return out;

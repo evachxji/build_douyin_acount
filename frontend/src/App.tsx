@@ -6,7 +6,6 @@ import { TopBar } from "./components/layout/TopBar";
 import { Waterfall } from "./components/layout/Waterfall";
 import { SettingsDrawer } from "./components/settings/SettingsDrawer";
 import { ApprovalDialog } from "./components/tasks/ApprovalDialog";
-import { RecommendationDialog } from "./components/tasks/RecommendationDialog";
 import { TaskQueuePanel } from "./components/tasks/TaskQueuePanel";
 import { useAssetsStore } from "./stores/assetsStore";
 import { useSelectionStore } from "./stores/selectionStore";
@@ -31,7 +30,6 @@ function App() {
   const focus = useSelectionStore((s) => s.focus);
   const taskOpen = useTaskStore((s) => s.open);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [recommendOpen, setRecommendOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() => readLayout("leftWidth", 224));
   const [rightWidth, setRightWidth] = useState(() => readLayout("rightWidth", 380));
   const [bottomHeight, setBottomHeight] = useState(() =>
@@ -70,10 +68,7 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-ink text-paper">
-      <TopBar
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenRecommendations={() => setRecommendOpen(true)}
-      />
+      <TopBar onOpenSettings={() => setSettingsOpen(true)} />
       <div className="flex min-h-0 flex-1">
         <Sidebar width={leftWidth} />
         <ResizeHandle direction="vertical" onResize={resizeLeft} />
@@ -88,7 +83,6 @@ function App() {
         </>
       )}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <RecommendationDialog open={recommendOpen} onClose={() => setRecommendOpen(false)} />
       <ApprovalDialog />
     </div>
   );

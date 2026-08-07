@@ -1,9 +1,9 @@
 import { useAssetsStore } from "../../stores/assetsStore";
 import { statusMeta } from "../../lib/format";
 
+// 分析中不单独展示，归入"待处理"（NEW）。
 const STATUS_ORDER = [
   "NEW",
-  "ANALYZING",
   "CANDIDATE",
   "SELECTED",
   "PUBLISHED",
@@ -16,8 +16,13 @@ export function Sidebar({ width }: { width: number }) {
   const filter = useAssetsStore((s) => s.filter);
   const setFilter = useAssetsStore((s) => s.setFilter);
 
-  const categoryActive = (name: string) =>
-    (filter.category ?? "") === name;
+  const statusCount = (status: string) => {
+    if (status === "NEW") {
+      return (overview?.statuses.find((s) => s.status === "NEW")?.count ?? 0) +
+        (overview?.statuses.find((s) => s.status === "ANALYZING")?.count ?? 0);
+    }
+    return overview?.statuses.find((s) => s.status === status)?.count ?? 0;
+  };
 
   return (
     <aside
@@ -39,7 +44,7 @@ export function Sidebar({ width }: { width: number }) {
         <span className="tabular-nums text-mute">{overview?.total ?? 0}</span>
       </button>
       {STATUS_ORDER.map((status) => {
-        const count = overview?.statuses.find((s) => s.status === status)?.count ?? 0;
+        const count = statusCount(status);
         return (
           <button
             key={status}
@@ -53,33 +58,6 @@ export function Sidebar({ width }: { width: number }) {
           </button>
         );
       })}
-
-      <div className="mb-1 mt-5 px-2 text-[11px] font-semibold uppercase tracking-wider text-mute">
-        分类
-      </div>
-      <button
-        onClick={() => void setFilter({ category: undefined })}
-        className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
-          filter.category === undefined
-            ? "bg-accent/15 text-accent"
-            : "text-paper/80 hover:bg-white/5"
-        }`}
-      >
-        <span>全部视频</span>
-        <span className="tabular-nums text-mute">{overview?.total ?? 0}</span>
-      </button>
-      {(overview?.categories ?? []).map((c) => (
-        <button
-          key={c.name}
-          onClick={() => void setFilter({ category: c.name })}
-          className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
-            categoryActive(c.name) ? "bg-accent/15 text-accent" : "text-paper/80 hover:bg-white/5"
-          }`}
-        >
-          <span className="truncate">{c.name}</span>
-          <span className="tabular-nums text-mute">{c.count}</span>
-        </button>
-      ))}
     </aside>
   );
 }

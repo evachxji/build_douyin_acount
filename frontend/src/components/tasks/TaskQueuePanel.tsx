@@ -18,6 +18,25 @@ const ACTIVE_STATUSES = ["PENDING", "RUNNING", "WAITING_FOR_HUMAN"];
 
 function TaskResult({ task, asset }: { task: AgentTask; asset?: VideoAsset }) {
   if (task.status !== "SUCCEEDED") {
+    // 采集任务进行中：显示 sidecar 透传的实时进度（已下载 x/y + 当前阶段）。
+    if (task.agent_name === "collector" && task.status === "RUNNING") {
+      const p = (task.payload.progress ?? {}) as {
+        downloaded?: number;
+        target?: number;
+        message?: string;
+      };
+      const text = [
+        p.target ? `已下载 ${p.downloaded ?? 0}/${p.target}` : null,
+        p.message || null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return (
+        <span className="min-w-0 flex-1 truncate text-paper/85" title={text}>
+          {text || "采集中…"}
+        </span>
+      );
+    }
     return task.error ? (
       <span className="min-w-0 flex-1 truncate text-bad" title={task.error}>
         {task.error}
@@ -133,8 +152,10 @@ export function TaskQueuePanel({ height }: { height: number }) {
       }
     }
     if (!asset) return;
-    // 切换到该素材所在状态，并清掉分类/搜索，确保目标可见。
-    await setFilter({ status: asset.status, category: undefined, search: undefined });
+    // 切换到该素材所在状态，并清掉搜索，确保目标可见。
+    // 分析中归入"待处理"（左侧栏无独立的分析中筛选项）。
+    const status = asset.status === "ANALYZING" ? "NEW" : asset.status;
+    await setFilter({ status, search: undefined });
     focus(assetId);
     window.dispatchEvent(new CustomEvent("asset-focus", { detail: assetId }));
   };
