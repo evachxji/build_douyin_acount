@@ -196,22 +196,6 @@ export function VideoCard({
         </div>
       </div>
 
-      {/* 多选开关：阻止冒泡，只切换选择 */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-        className={`absolute right-2 top-9 rounded border px-1.5 py-0.5 text-[10px] transition-colors ${
-          selected
-            ? "border-accent bg-accent text-ink"
-            : "border-white/40 bg-black/80 text-paper/95 hover:border-accent/60"
-        }`}
-        title="多选切换"
-      >
-        选
-      </button>
-
       {menu &&
         createPortal(
           <div

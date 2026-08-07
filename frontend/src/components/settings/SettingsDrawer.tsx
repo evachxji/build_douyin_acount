@@ -47,7 +47,7 @@ function ConditionList({
   };
   const remove = (i: number) => onChange(items.filter((_, idx) => idx !== i));
   return (
-    <div className="border-t border-line pt-3">
+    <div className="col-span-2 border-t border-line pt-3">
       <p className="text-xs font-semibold uppercase tracking-wider text-mute">{title}</p>
       {items.length === 0 && <p className="mt-2 text-xs text-mute">不限制（空列表）</p>}
       <div className="mt-2 space-y-2">
@@ -121,14 +121,8 @@ export function SettingsDrawer({
     "h-9 w-full rounded border border-line bg-ink px-2 text-sm text-paper focus:border-accent/60 focus:outline-none";
 
   return (
-    <div
-      className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="flex h-full w-[420px] flex-col border-l border-line bg-panel p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm">
+      <div className="flex h-full w-2/3 flex-col border-l border-line bg-panel p-5 shadow-2xl">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-paper">设置</h2>
           <button onClick={onClose} className="text-sm text-mute hover:text-paper">
@@ -136,7 +130,7 @@ export function SettingsDrawer({
           </button>
         </div>
 
-        <div className="mt-4 space-y-3 overflow-y-auto text-sm">
+        <div className="mt-4 grid flex-1 grid-cols-2 content-start gap-x-4 gap-y-3 overflow-y-auto text-sm">
           <label className="block">
             <span className="text-xs text-mute">Ollama 地址</span>
             <input className={field} value={settings.ollama_url} onChange={(e) => set({ ollama_url: e.target.value })} />
@@ -174,7 +168,7 @@ export function SettingsDrawer({
             items={settings.exclude_conditions}
             onChange={(exclude_conditions) => set({ exclude_conditions })}
           />
-          <div className="border-t border-line pt-3">
+          <div className="col-span-2 border-t border-line pt-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-mute">
               采集设置
             </p>
@@ -188,28 +182,26 @@ export function SettingsDrawer({
               onChange={(e) => set({ batch_size: Number(e.target.value) })}
             />
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-xs text-mute">TikTok 比例（0-1）</span>
-              <input
-                type="number"
-                step="0.05"
-                className={field}
-                value={settings.tiktok_ratio}
-                onChange={(e) => set({ tiktok_ratio: Number(e.target.value) })}
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs text-mute">Instagram 比例（0-1）</span>
-              <input
-                type="number"
-                step="0.05"
-                className={field}
-                value={settings.instagram_ratio}
-                onChange={(e) => set({ instagram_ratio: Number(e.target.value) })}
-              />
-            </label>
-          </div>
+          <label className="block">
+            <span className="text-xs text-mute">TikTok 比例（0-1）</span>
+            <input
+              type="number"
+              step="0.05"
+              className={field}
+              value={settings.tiktok_ratio}
+              onChange={(e) => set({ tiktok_ratio: Number(e.target.value) })}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-mute">Instagram 比例（0-1）</span>
+            <input
+              type="number"
+              step="0.05"
+              className={field}
+              value={settings.instagram_ratio}
+              onChange={(e) => set({ instagram_ratio: Number(e.target.value) })}
+            />
+          </label>
           <label className="block">
             <span className="text-xs text-mute">点赞上限（超过不采集）</span>
             <input
@@ -224,7 +216,7 @@ export function SettingsDrawer({
             <span className="text-xs text-mute">yt-dlp 路径</span>
             <input className={field} value={settings.ytdlp_path} onChange={(e) => set({ ytdlp_path: e.target.value })} />
           </label>
-          <label className="block">
+          <label className="col-span-2 block">
             <span className="text-xs text-mute">文案风格 Prompt</span>
             <textarea
               rows={3}
@@ -234,7 +226,7 @@ export function SettingsDrawer({
               className="w-full resize-y rounded border border-line bg-ink px-2 py-1.5 text-sm text-paper focus:border-accent/60 focus:outline-none"
             />
           </label>
-          <p className="text-[11px] leading-relaxed text-mute">
+          <p className="col-span-2 text-[11px] leading-relaxed text-mute">
             采集配额与 yt-dlp 路径保存后，下一次采集立即生效。
           </p>
         </div>
