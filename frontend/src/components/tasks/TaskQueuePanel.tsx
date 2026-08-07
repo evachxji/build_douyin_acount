@@ -185,7 +185,7 @@ export function TaskQueuePanel({ height }: { height: number }) {
         <span className="w-16 shrink-0">#ID</span>
         <span className="w-14 shrink-0">Agent</span>
         <span className="w-24 shrink-0">任务类型</span>
-        <span className="w-16 shrink-0">素材</span>
+        <span className="w-32 shrink-0">素材</span>
         <span className="w-10 shrink-0 tabular-nums">尝试</span>
         <span className="w-20 shrink-0">创建时间</span>
         <span className="w-20 shrink-0">结束时间</span>
