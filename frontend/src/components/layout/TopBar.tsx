@@ -90,7 +90,6 @@ export function TopBar({
 
       <div className="flex-1" />
 
-      <OllamaStatusTag />
       <button
         onClick={() => void reload()}
         className="h-9 rounded border border-line px-3 text-sm text-mute hover:border-accent/40 hover:text-paper"
@@ -98,6 +97,7 @@ export function TopBar({
       >
         ⟳
       </button>
+      <OllamaStatusTag />
       <button
         onClick={() => void handleImport()}
         className="h-9 rounded border border-line px-3 text-sm text-paper hover:border-accent/50 hover:bg-accent/10"

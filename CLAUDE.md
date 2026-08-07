@@ -49,12 +49,12 @@ pnpm build        # tsc 类型检查 + vite 打包（无 eslint，类型检查�
 
 - **React 前端只做 UI**：`frontend/src/api/client.ts` 封装全部 `invoke` 调用；后端 `DomainError` 统一转成前端 `ApiError { code, message }`。
 - **Rust 主进程承载全部业务逻辑**：commands（IPC 校验）→ agents（任务编排）→ analysis/collector/publish（能力实现）→ db/repos（rusqlite）。
-- **Node sidecar 做浏览器与下载**：`scripts/collector/collect.js`（opencli 刷推荐流 + yt-dlp 下载）、`scripts/douyin-publisher/publish.js`（抖音 creator 后台填表）。Rust Agent 用 `Command` spawn sidecar，**通过文件异步通信**：sidecar 写 `progress.json` / `videos.jsonl` / `imported.jsonl` 到 `storage/collect/<task_id>/`，Agent 每轮轮询读文件判断进度。
+- **Node sidecar 做浏览器与下载**：`scripts/collector/collect.js`（opencli 刷推荐流 + yt-dlp 下载）、`scripts/douyin-publisher/publish.js`（抖音 creator 后台填表：正文 fill + 话题逐字键入并点选联想项、自动执行「自主声明→内容为转载信息→取材站外→确定」）。Rust Agent 用 `Command` spawn sidecar，**通过文件异步通信**：sidecar 写 `progress.json` / `videos.jsonl` / `imported.jsonl` 到 `storage/collect/<task_id>/`，Agent 每轮轮询读文件判断进度。
 - **AI 能力在外部进程**：Ollama（HTTP）、Whisper（Python 脚本子进程）、FFmpeg（子进程）。
 
 ### Agent Runtime（核心机制）
 
-- 统一契约 `agents/mod.rs`：`trait Agent { fn name(); fn run(ctx, task) -> Result<AgentOutcome> }`，`AgentOutcome` 三态：`Succeeded(json)` / `WaitingForHuman(json)` / `Continue`（保持 RUNNING，下轮继续轮询——sidecar 长任务全靠这个）。
+- 统一契约 `agents/mod.rs`：`trait Agent { fn name(); fn run(ctx, task) -> Result<AgentOutcome> }`，`AgentOutcome` 四态：`Succeeded(json)` / `WaitingForHuman(json)` / `Cancelled(json)`（用户中止，如关闭浏览器标签页，置 CANCELLED 终态不重试）/ `Continue`（保持 RUNNING，下轮继续轮询——sidecar 长任务全靠这个）。
 - 任务持久化在 SQLite `agent_tasks` 表（PENDING/RUNNING/WAITING_FOR_HUMAN/SUCCEEDED/FAILED/CANCELLED + 指数退避重试），应用重启可续跑。
 - `lib.rs` setup 起两个后台线程，每 2s 各调一次 `runtime.run_once(...)`：一个专跑 `vision`，另一个轮询 `publisher`/`collector`/`content`。**同一 Agent 串行**（本地 AI 资源有限）。
 - `AppState::build_runtime()` / `build_pipeline()`（`state.rs`）每次调用时**按当前设置现场装配** agent 和管线——设置改动即时生效，无需重启。
@@ -80,6 +80,7 @@ pnpm build        # tsc 类型检查 + vite 打包（无 eslint，类型检查�
 - **采集完成统计以 `imported.jsonl` 行数为准**：sidecar 逐条追加 `videos.jsonl`、Agent 在 RUNNING 阶段已增量导入大部分视频，任务 Done 时若只统计最终轮新增会把累计数算成 0/1（`imported` 与 `first_asset` 都犯过）。统计须在清理临时目录前读 `imported.jsonl`；回归测试 `collector_imported_is_task_total_not_final_round`（`fake_collect_batch.cjs` 分批时序）守护此行为。
 - **Whisper ASR 会静默失败**：sidecar 是 `scripts/whisper-server/whisper_transcribe.py`（faster-whisper），`whisper_python` 必须解析为绝对路径（相对路径在应用进程里找不到脚本）；CUDA 库缺失时已做 CPU 回退。改 ASR 相关代码后必须用真实视频验证一次转写，失败不会抛出明显错误。
 - **本机调试脚本（`storage/logs/*.py`，gitignored，仅此机器存在）**：`cdp_helper.py`（经 WebView2 CDP 驱动运行中的应用：`list|eval|click|shot`，需启动 app 前设 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222 --remote-allow-origins=*'`）、`status_snapshot.py`（库/任务快照）、`watch_progress.py`（盯采集 progress.json）、`export_ig_cookies.py`（IG 下载 cookie 导出，需先完全关闭 Chrome）。
+- **顶栏 Ollama 状态标签**：每 5s 探测 `GET /api/version`（`commands/ollama.rs` 的 `check_ollama`，2s 超时）；未启动时点击弹确认，确认后 `start_ollama` spawn `ollama serve`（`CREATE_NO_WINDOW`），前端轮询直至就绪。改 Ollama 连接/启动相关逻辑时保持此契约。
 - **安全红线（验收标准）**：不得引入对抖音发布按钮的自动点击；发布完成标记只能由用户手动确认触发；自动化识别不到表单元素时必须停止并提示，不得盲目操作。
 
 ## 提交规范
