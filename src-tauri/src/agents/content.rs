@@ -25,7 +25,8 @@ impl CopyGenerator for OllamaCopyGenerator {
     fn generate_copy(&self, style_prompt: &str, analysis_context: &str) -> Result<String, DomainError> {
         let system = format!(
             "你是抖音短视频运营文案专家。账号风格要求：{style_prompt}。\n\
-             只输出 JSON，不要任何多余文字：{{\"title\":\"抖音标题（≤30字，可带 emoji）\",\"body\":\"正文描述（1~3句）\",\"hashtags\":[\"话题1\",\"话题2\"]}}"
+             只输出 JSON，不要任何多余文字：{{\"title\":\"抖音标题（≤30字，可带 emoji）\",\"body\":\"正文描述（1~3句）\",\"hashtags\":[\"话题1\",\"话题2\"]}}\n\
+             注意：body 必须是纯文案，不要出现任何 # 话题标签；话题词只放在 hashtags 数组里（发布时会追加在正文最后一行）。"
         );
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
@@ -53,6 +54,21 @@ impl ContentAgent {
     }
 }
 
+/// 剥离正文中与 hashtags 数组一致的内嵌 #话题（标签只保留在最后一行/发布追加）。
+fn strip_inline_hashtags(body: &str, hashtags: &[String]) -> String {
+    let mut out = body.to_string();
+    for tag in hashtags {
+        out = out.replace(&format!("#{tag}"), "").replace(&format!("＃{tag}"), "");
+    }
+    // 清理剥除后的行尾空白与空行，保留原有换行结构。
+    out.lines()
+        .map(|l| l.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 /// 解析并校验 LLM 输出的文案 JSON。
 fn parse_copy(raw: &str) -> Result<(String, String, Vec<String>), DomainError> {
     let value: serde_json::Value = serde_json::from_str(raw)
@@ -78,6 +94,7 @@ fn parse_copy(raw: &str) -> Result<(String, String, Vec<String>), DomainError> {
                 .collect()
         })
         .unwrap_or_default();
+    let body = strip_inline_hashtags(&body, &hashtags);
     // 抖音标题上限 30 字符
     let title: String = title.chars().take(30).collect();
     Ok((title, body, hashtags))

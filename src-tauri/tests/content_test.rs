@@ -104,6 +104,40 @@ fn content_agent_generates_and_stores_copy() {
     assert_eq!(copy.hashtags, vec!["萌宠", "猫咪", "治愈"]);
 }
 
+struct InlineTagsGenerator;
+
+impl CopyGenerator for InlineTagsGenerator {
+    fn generate_copy(&self, _s: &str, _c: &str) -> Result<String, DomainError> {
+        Ok(r#"{"title":"高空飞行体验","body":"谁不想体验一把？#滑车 #自然风光\n最值得的打卡点！","hashtags":["滑车","自然风光","旅行"]}"#
+            .to_string())
+    }
+}
+
+#[test]
+fn content_agent_strips_inline_hashtags_from_body() {
+    // 正文里内嵌的 #话题（与 hashtags 一致）必须剥离，标签只保留在最后一行。
+    let db = test_db();
+    let asset_id = insert_asset(&db, "滑车视频", "auth", 0);
+    attach_analysis(&db, asset_id, "生活", 90);
+    TasksRepo::new(&db)
+        .enqueue(
+            "content",
+            "generate_copy",
+            json!({ "asset_id": asset_id, "style": "治愈" }),
+            false,
+        )
+        .expect("enqueue");
+    let task = TasksRepo::new(&db).claim_next("content").expect("claim").expect("task");
+    let agent = ContentAgent::new(Arc::new(InlineTagsGenerator));
+    let store = MediaStore::new(std::env::temp_dir().join("content-test-inline"));
+    let ctx = AgentContext { db: &db, store };
+    let outcome = agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Succeeded(_)));
+    let copy = ContentRepo::new(&db).get_by_asset(asset_id).expect("get").expect("copy");
+    assert_eq!(copy.body, "谁不想体验一把？\n最值得的打卡点！");
+    assert_eq!(copy.hashtags, vec!["滑车", "自然风光", "旅行"]);
+}
+
 #[test]
 fn recommender_scores_groups_and_enqueues_copy_tasks() {
     let db = test_db();
