@@ -166,8 +166,9 @@ export function DetailPanel({ width }: { width: number }) {
   return (
     <aside
       style={{ width }}
-      className="flex shrink-0 flex-col overflow-y-auto border-l border-line bg-panel/60"
+      className="flex shrink-0 flex-col border-l border-line bg-panel/60"
     >
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="p-4">
         <video
           key={asset.file_path}
@@ -201,6 +202,11 @@ export function DetailPanel({ width }: { width: number }) {
             📁
           </button>
         </div>
+        {asset.status === "ELIMINATED" && (
+          <p className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1 text-xs text-bad">
+            淘汰原因：{asset.eliminate_reason ?? "未记录"}
+          </p>
+        )}
       </div>
 
       <div className="mt-4 border-t border-line px-4 py-4">
@@ -288,7 +294,8 @@ export function DetailPanel({ width }: { width: number }) {
         )}
       </div>
 
-      <div className="mt-auto flex flex-wrap gap-2 border-t border-line p-4">
+      </div>
+      <div className="flex shrink-0 flex-wrap gap-2 border-t border-line p-4">
         {asset.status !== "CANDIDATE" && (
           <button
             onClick={() => void handleAnalyze()}

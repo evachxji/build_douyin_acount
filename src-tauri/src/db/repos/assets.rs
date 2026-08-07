@@ -8,7 +8,7 @@ use crate::domain::error::DomainError;
 /// 资产列表筛选条件。
 #[derive(Debug, Default, Clone)]
 pub struct AssetFilter {
-    pub status: Option<AssetStatus>,
+    pub statuses: Vec<AssetStatus>,
     pub platform: Option<String>,
     pub category: Option<String>,
     pub search: Option<String>,
@@ -25,7 +25,7 @@ const ASSET_COLS: &str = "va.id, va.dedup_key, va.file_path, va.cover_path, va.s
     va.source_url, va.author, va.title, va.description, va.published_at, va.tags_json,
     va.likes, va.comments, va.plays, va.duration_ms, va.status,
     ar.category AS category, ar.quality_score AS quality_score,
-    va.created_at, va.updated_at";
+    va.created_at, va.updated_at, va.eliminate_reason";
 
 fn row_to_asset(row: &Row<'_>) -> rusqlite::Result<VideoAsset> {
     let tags: String = row.get(10)?;
@@ -53,6 +53,7 @@ fn row_to_asset(row: &Row<'_>) -> rusqlite::Result<VideoAsset> {
         quality_score: row.get(17)?,
         created_at: row.get(18)?,
         updated_at: row.get(19)?,
+        eliminate_reason: row.get(20)?,
     })
 }
 
@@ -128,9 +129,12 @@ impl<'a> AssetsRepo<'a> {
     pub fn list(&self, filter: AssetFilter) -> Result<Vec<VideoAsset>, DomainError> {
         let mut conditions: Vec<String> = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(s) = filter.status {
-            conditions.push("va.status = ?".to_string());
-            values.push(Box::new(s.to_string()));
+        if !filter.statuses.is_empty() {
+            let placeholders = vec!["?"; filter.statuses.len()].join(", ");
+            conditions.push(format!("va.status IN ({placeholders})"));
+            for s in &filter.statuses {
+                values.push(Box::new(s.to_string()));
+            }
         }
         if let Some(p) = filter.platform {
             conditions.push("va.source_platform = ?".to_string());
@@ -185,6 +189,18 @@ impl<'a> AssetsRepo<'a> {
             "UPDATE video_assets SET status = ?1, updated_at = ?2 WHERE id = ?3",
             params![to.to_string(), now(), id],
         )?;
+        Ok(())
+    }
+
+    /// 记录/清除淘汰原因（AI 淘汰写具体原因，手工淘汰写「手工淘汰」，离开淘汰态时清除）。
+    pub fn set_eliminate_reason(&self, id: i64, reason: Option<&str>) -> Result<(), DomainError> {
+        let n = self.db.conn().execute(
+            "UPDATE video_assets SET eliminate_reason = ?1, updated_at = ?2 WHERE id = ?3",
+            params![reason, now(), id],
+        )?;
+        if n == 0 {
+            return Err(DomainError::AssetNotFound(id));
+        }
         Ok(())
     }
 

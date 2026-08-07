@@ -103,6 +103,8 @@ pub struct VideoAsset {
     pub plays: i64,
     pub duration_ms: i64,
     pub status: AssetStatus,
+    /// 淘汰原因（AI 淘汰为具体原因，手工淘汰为「手工淘汰」，非淘汰态为 None）。
+    pub eliminate_reason: Option<String>,
     /// 来自 analysis_results 的联表字段，未分析时为 None。
     pub category: Option<String>,
     pub quality_score: Option<i64>,

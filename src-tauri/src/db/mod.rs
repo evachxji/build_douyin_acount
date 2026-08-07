@@ -24,6 +24,7 @@ impl Database {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(migrations::MIGRATIONS)?;
         ensure_analysis_conditions_column(&conn)?;
+        ensure_eliminate_reason_column(&conn)?;
         seed_account_styles(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -46,6 +47,18 @@ fn ensure_analysis_conditions_column(conn: &Connection) -> Result<(), DomainErro
         conn.execute_batch(
             "ALTER TABLE analysis_results ADD COLUMN condition_results_json TEXT NOT NULL DEFAULT '[]'",
         )?;
+    }
+    Ok(())
+}
+
+/// 旧库升级：video_assets 缺 eliminate_reason 列时补上（幂等，每次启动安全）。
+fn ensure_eliminate_reason_column(conn: &Connection) -> Result<(), DomainError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(video_assets)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    if !cols.iter().any(|c| c == "eliminate_reason") {
+        conn.execute_batch("ALTER TABLE video_assets ADD COLUMN eliminate_reason TEXT")?;
     }
     Ok(())
 }

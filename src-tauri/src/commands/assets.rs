@@ -14,7 +14,7 @@ use crate::state::AppState;
 #[derive(Debug, serde::Deserialize)]
 pub struct AssetListFilterArg {
     pub category: Option<String>,
-    pub status: Option<String>,
+    pub statuses: Option<Vec<String>>,
     pub platform: Option<String>,
     pub search: Option<String>,
     pub limit: Option<i64>,
@@ -26,14 +26,15 @@ pub fn list_assets(
     state: State<AppState>,
     filter: AssetListFilterArg,
 ) -> Result<Vec<VideoAsset>, ApiError> {
-    let status = filter
-        .status
-        .as_deref()
-        .map(str::parse::<AssetStatus>)
-        .transpose()
+    let statuses = filter
+        .statuses
+        .unwrap_or_default()
+        .iter()
+        .map(|s| s.parse::<AssetStatus>())
+        .collect::<Result<Vec<_>, _>>()
         .map_err(ApiError::from)?;
     let filter = AssetFilter {
-        status,
+        statuses,
         platform: filter.platform,
         category: filter.category,
         search: filter.search,
@@ -67,7 +68,7 @@ pub fn delete_asset(state: State<AppState>, id: i64) -> Result<(), ApiError> {
         .map_err(ApiError::from)
 }
 
-/// 状态流转（合法性由状态机校验）。
+/// 状态流转（合法性由状态机校验）；手工标记淘汰时记录「手工淘汰」，离开淘汰态时清除原因。
 #[tauri::command]
 pub fn update_asset_status(
     state: State<AppState>,
@@ -75,9 +76,14 @@ pub fn update_asset_status(
     to: String,
 ) -> Result<(), ApiError> {
     let status: AssetStatus = to.parse().map_err(ApiError::from)?;
-    VideoManager::new(&state.db, state.store.clone())
-        .update_status(id, status)
-        .map_err(ApiError::from)
+    VideoManager::new(&state.db, state.store.clone()).update_status(id, status)?;
+    let reason = if status == AssetStatus::Eliminated {
+        Some("手工淘汰")
+    } else {
+        None
+    };
+    AssetsRepo::new(&state.db).set_eliminate_reason(id, reason)?;
+    Ok(())
 }
 
 /// 导入本地视频文件；单文件失败不阻断其余文件（失败以 warn 记录）。

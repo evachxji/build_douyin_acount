@@ -116,6 +116,31 @@ impl FilterAgent {
             FilterVerdict::SkipDownload | FilterVerdict::LowPriority => AssetStatus::Eliminated,
         }
     }
+
+    /// 把判定结论翻译为用户可读的淘汰原因（写入资产，供详情页展示）。
+    pub fn eliminate_reason_text(
+        decision: &FilterDecision,
+        analysis: &NewAnalysis,
+        rules: &FilterRules,
+    ) -> Option<String> {
+        match decision.verdict {
+            FilterVerdict::Keep => None,
+            FilterVerdict::SkipDownload => {
+                let r = decision.reason.as_deref().unwrap_or("");
+                if let Some(c) = r.strip_prefix("excluded_by_condition: ") {
+                    Some(format!("排除条件命中：{c}"))
+                } else if r == "no_hit_condition" {
+                    Some("命中条件全部未命中".to_string())
+                } else {
+                    Some("条件判定淘汰".to_string())
+                }
+            }
+            FilterVerdict::LowPriority => match analysis.quality_score {
+                Some(s) => Some(format!("质量分 {s} 低于保留线 {}", rules.quality_min_keep)),
+                None => Some("质量分不足".to_string()),
+            },
+        }
+    }
 }
 
 impl Agent for FilterAgent {
@@ -147,8 +172,11 @@ impl Agent for FilterAgent {
             condition_results: analysis.condition_results,
         };
         let decision = Self::evaluate(&new_analysis, &self.rules)?;
+        let reason_text = Self::eliminate_reason_text(&decision, &new_analysis, &self.rules);
         let status = Self::verdict_status(decision.verdict);
-        AssetsRepo::new(ctx.db).update_status(asset_id, status)?;
+        let assets = AssetsRepo::new(ctx.db);
+        assets.update_status(asset_id, status)?;
+        assets.set_eliminate_reason(asset_id, reason_text.as_deref())?;
         Ok(AgentOutcome::Succeeded(serde_json::json!({
             "asset_id": asset_id,
             "verdict": decision.verdict.as_str(),

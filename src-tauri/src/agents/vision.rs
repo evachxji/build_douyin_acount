@@ -79,9 +79,11 @@ impl Agent for VisionAgent {
                 &rules.condition_basis,
             )?;
         let decision = FilterAgent::evaluate(&analysis, &rules)?;
+        let reason_text = FilterAgent::eliminate_reason_text(&decision, &analysis, &rules);
         AnalysesRepo::new(ctx.db).upsert(analysis)?;
         let status = FilterAgent::verdict_status(decision.verdict);
         assets.update_status(asset_id, status)?;
+        assets.set_eliminate_reason(asset_id, reason_text.as_deref())?;
         Ok(AgentOutcome::Succeeded(serde_json::json!({
             "asset_id": asset_id,
             "verdict": decision.verdict.as_str(),

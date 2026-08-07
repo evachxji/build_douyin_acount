@@ -98,6 +98,49 @@ fn legacy_db_gets_condition_results_column() {
 }
 
 #[test]
+fn legacy_db_gets_eliminate_reason_column() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("legacy.db");
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch(
+            "CREATE TABLE video_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL DEFAULT 'NEW'
+            );",
+        )
+        .expect("create legacy table");
+    }
+    let db = Database::open(&path).expect("open upgrades legacy db");
+    let cols: Vec<String> = db
+        .conn()
+        .prepare("PRAGMA table_info(video_assets)")
+        .expect("pragma")
+        .query_map([], |r| r.get::<_, String>(1))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("collect");
+    assert!(cols.iter().any(|c| c == "eliminate_reason"));
+}
+
+#[test]
+fn asset_eliminate_reason_set_and_clear() {
+    let db = test_db();
+    let assets = AssetsRepo::new(&db);
+    let id = assets.insert(sample_asset("reason")).expect("insert");
+    assert_eq!(assets.get(id).expect("get").expect("some").eliminate_reason, None);
+    assets
+        .set_eliminate_reason(id, Some("排除条件命中：色情"))
+        .expect("set");
+    assert_eq!(
+        assets.get(id).expect("get").expect("some").eliminate_reason.as_deref(),
+        Some("排除条件命中：色情")
+    );
+    assets.set_eliminate_reason(id, None).expect("clear");
+    assert_eq!(assets.get(id).expect("get").expect("some").eliminate_reason, None);
+}
+
+#[test]
 fn asset_insert_get_roundtrip() {
     let db = test_db();
     let repo = AssetsRepo::new(&db);
@@ -168,8 +211,12 @@ fn asset_list_filters_by_status_and_category() {
     })
     .expect("analysis");
 
-    let ready = assets.list(AssetFilter { status: Some(AssetStatus::Candidate), ..Default::default() }).expect("list");
+    let ready = assets.list(AssetFilter { statuses: vec![AssetStatus::Candidate], ..Default::default() }).expect("list");
     assert_eq!(ready.len(), 1);
+    // 多状态 IN 查询：待处理（NEW）与候选一并命中。
+    assets.insert(sample_asset("new_video")).expect("insert");
+    let pending = assets.list(AssetFilter { statuses: vec![AssetStatus::New, AssetStatus::Candidate], ..Default::default() }).expect("list");
+    assert_eq!(pending.len(), 2);
     let cats = assets.list(AssetFilter { category: Some("宠物".to_string()), ..Default::default() }).expect("list");
     assert_eq!(cats.len(), 1);
     let none = assets.list(AssetFilter { category: Some("美食".to_string()), ..Default::default() }).expect("list");
@@ -281,6 +328,21 @@ fn task_enqueue_claim_and_succeed() {
     repo.succeed(id).expect("succeed");
     assert_eq!(repo.get(id).expect("get").expect("some").status, TaskStatus::Succeeded);
     assert!(repo.claim_next("vision").expect("claim").is_none());
+}
+
+#[test]
+fn task_has_active_flags_pending_and_running() {
+    let db = test_db();
+    let repo = TasksRepo::new(&db);
+    assert!(!repo.has_active("collector").expect("empty"));
+    repo.enqueue("collector", "collect_batch", serde_json::json!({}), false).expect("enqueue");
+    assert!(repo.has_active("collector").expect("pending"));
+    // 其他 agent 不受影响。
+    assert!(!repo.has_active("vision").expect("other agent"));
+    let task = repo.claim_next("collector").expect("claim").expect("some");
+    assert!(repo.has_active("collector").expect("running"));
+    repo.succeed(task.id).expect("succeed");
+    assert!(!repo.has_active("collector").expect("done"));
 }
 
 #[test]
