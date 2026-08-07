@@ -151,6 +151,15 @@ fn load_imported(path: &Path) -> Result<HashSet<String>, DomainError> {
     Ok(set)
 }
 
+/// imported.jsonl 首行（保序的第一条已处理视频 dedup key），无内容时返回 None。
+fn first_imported_line(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()?
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.trim().to_string())
+}
+
 fn append_line(path: &Path, line: &str) -> Result<(), DomainError> {
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
@@ -274,15 +283,13 @@ impl Agent for CollectorAgent {
             }
             CollectorState::Done => {
                 let enqueued = import_new_videos(ctx, task.id)?;
-                // 视频已复制进素材库，清理采集临时目录。
-                let dir = collect_dir(&ctx.store, task.id);
-                if dir.is_dir() {
-                    let _ = std::fs::remove_dir_all(&dir);
-                }
-                // 附带首条导入视频信息，供任务面板展示采集结果。
-                let first_asset = enqueued
-                    .first()
-                    .and_then(|id| AssetsRepo::new(ctx.db).get(*id).ok().flatten())
+                // 累计统计：Running 阶段已增量导入大部分视频，imported 以 imported.jsonl
+                // 行数为准（本任务全部已处理视频），而非 Done 这一轮新导入的数量。
+                let ip = imported_path(&ctx.store, task.id);
+                let imported_count = load_imported(&ip)?.len();
+                // 首条展示：取本任务第一条已处理视频（imported.jsonl 首行 dedup -> 素材）。
+                let first_asset = first_imported_line(&ip)
+                    .and_then(|dedup| AssetsRepo::new(ctx.db).find_by_dedup(&dedup).ok().flatten())
                     .map(|a| {
                         json!({
                             "title": a.title,
@@ -291,8 +298,13 @@ impl Agent for CollectorAgent {
                         })
                     })
                     .unwrap_or(serde_json::Value::Null);
+                // 视频已复制进素材库，清理采集临时目录。
+                let dir = collect_dir(&ctx.store, task.id);
+                if dir.is_dir() {
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
                 Ok(AgentOutcome::Succeeded(json!({
-                    "imported": enqueued.len(),
+                    "imported": imported_count,
                     "enqueued_analysis": enqueued.len(),
                     "first_asset": first_asset,
                 })))

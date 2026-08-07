@@ -25,6 +25,10 @@ struct TestEnv {
 }
 
 fn setup(count: i64) -> TestEnv {
+    setup_with(count, "fake_collect.cjs")
+}
+
+fn setup_with(count: i64, script: &str) -> TestEnv {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = Database::open(&dir.path().join("test.db")).expect("db");
     let store = MediaStore::new(dir.path().join("storage"));
@@ -38,7 +42,7 @@ fn setup(count: i64) -> TestEnv {
             false,
         )
         .expect("enqueue");
-    let agent = CollectorAgent::new("node", fixture("fake_collect.cjs"), "yt-dlp");
+    let agent = CollectorAgent::new("node", fixture(script), "yt-dlp");
     TestEnv {
         _dir: dir,
         db,
@@ -116,6 +120,52 @@ fn collector_imports_downloaded_videos_and_enqueues_analysis() {
         .filter(|t| t.agent_name == "vision" && t.task_type == "analyze")
         .count();
     assert_eq!(vision, 2);
+}
+
+#[test]
+fn collector_imported_is_task_total_not_final_round() {
+    // 回归：真实 sidecar 逐条追加 videos.jsonl，Agent 在 RUNNING 阶段已增量导入大部分，
+    // Done 时若只按"本轮新导入"计数，会把全任务累计数算成 0/1。imported 必须是全任务累计。
+    let env = setup_with(3, "fake_collect_batch.cjs");
+    let out = env
+        .store
+        .root()
+        .join("collect")
+        .join(env.task_id.to_string())
+        .join("output");
+    std::fs::create_dir_all(&out).expect("output dir");
+    let sample = fixture("sample_1s.mp4");
+    for i in 1..=3 {
+        std::fs::copy(&sample, out.join(format!("fake{i}.mp4"))).expect("copy fake video");
+    }
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let mut outcome = None;
+    for _ in 0..30 {
+        let task = claim(&env);
+        outcome = Some(env.agent.run(&ctx, task).expect("run"));
+        if !matches!(outcome.as_ref().unwrap(), AgentOutcome::Continue) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    match outcome.expect("ran") {
+        AgentOutcome::Succeeded(v) => {
+            assert_eq!(v["imported"], 3, "imported 应为全任务累计 3 条，而非最终轮新增");
+            assert_eq!(v["first_asset"]["title"], "fake 1");
+        }
+        other => panic!("expected Succeeded, got {other:?}"),
+    }
+    // 三条均入库。
+    let assets = AssetsRepo::new(&env.db);
+    for i in 1..=3 {
+        assert!(
+            assets.find_by_dedup(&format!("tiktok:fake{i}")).expect("find").is_some(),
+            "fake{i} 应已入库"
+        );
+    }
 }
 
 #[test]
