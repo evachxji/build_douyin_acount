@@ -211,10 +211,10 @@ export function TaskQueuePanel({ height }: { height: number }) {
               <span className="w-14 shrink-0 text-paper/85">{agentLabel(t.agent_name)}</span>
               <span className="w-24 shrink-0 text-paper/85">{taskTypeLabel(t.task_type)}</span>
               <span
-                className="w-16 shrink-0 truncate text-mute"
-                title={String(t.payload.asset_id ?? "")}
+                className="w-32 shrink-0 truncate text-mute"
+                title={cached?.title ?? `素材 #${String(t.payload.asset_id ?? "")}`}
               >
-                素材 {String(t.payload.asset_id ?? "—")}
+                {cached?.title ?? `素材 #${String(t.payload.asset_id ?? "—")}`}
               </span>
               <span className="w-10 shrink-0 tabular-nums text-mute">
                 {t.attempts}/{t.max_attempts}
