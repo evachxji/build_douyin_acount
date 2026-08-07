@@ -19,7 +19,7 @@ impl TaskStatus {
     pub fn can_transition_to(&self, to: &TaskStatus) -> bool {
         use TaskStatus::*;
         match (self, to) {
-            (Pending, Running) => true,
+            (Pending, Running | Cancelled) => true, // 排队中可直接取消
             (Running, Succeeded | Failed | WaitingForHuman | Cancelled) => true,
             (WaitingForHuman, Running | Cancelled) => true,
             (Failed, Pending) => true, // 重试

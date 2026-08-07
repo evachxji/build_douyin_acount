@@ -458,6 +458,22 @@ fn task_running_can_be_cancelled_by_human() {
 }
 
 #[test]
+fn task_pending_can_be_cancelled_by_human() {
+    // 回归：排队中（PENDING）的分析任务必须能直接取消——
+    // 曾因状态机缺 (Pending, Cancelled) 迁移，前端点取消报 IllegalTransition，任务纹丝不动。
+    let db = test_db();
+    let repo = TasksRepo::new(&db);
+    let id = repo
+        .enqueue("vision", "analyze", serde_json::json!({}), false)
+        .expect("enqueue");
+    repo.cancel(id).expect("cancel pending task");
+    let t = repo.get(id).expect("get").expect("some");
+    assert_eq!(t.status, TaskStatus::Cancelled);
+    // 终态不可再被认领（不会复活）。
+    assert!(repo.claim_next("vision").expect("claim").is_none());
+}
+
+#[test]
 fn draft_repo_create_list_and_status_flow() {
     use build_douyin_acount_lib::db::repos::drafts::DraftsRepo;
     use build_douyin_acount_lib::domain::draft::{DraftStatus, NewDraft};

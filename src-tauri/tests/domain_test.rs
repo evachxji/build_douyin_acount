@@ -39,6 +39,7 @@ fn asset_status_rejects_illegal_transitions() {
 #[test]
 fn task_status_allows_documented_transitions() {
     assert!(TaskStatus::Pending.can_transition_to(&TaskStatus::Running));
+    assert!(TaskStatus::Pending.can_transition_to(&TaskStatus::Cancelled)); // 排队中可直接取消
     assert!(TaskStatus::Running.can_transition_to(&TaskStatus::Succeeded));
     assert!(TaskStatus::Running.can_transition_to(&TaskStatus::Failed));
     assert!(TaskStatus::Running.can_transition_to(&TaskStatus::WaitingForHuman));
