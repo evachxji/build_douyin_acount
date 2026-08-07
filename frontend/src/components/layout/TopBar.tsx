@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useTaskStore } from "../../stores/taskStore";
+import { OllamaStatusTag } from "./OllamaStatusTag";
 
 export function TopBar({
   onOpenSettings,
@@ -89,6 +90,7 @@ export function TopBar({
 
       <div className="flex-1" />
 
+      <OllamaStatusTag />
       <button
         onClick={() => void reload()}
         className="h-9 rounded border border-line px-3 text-sm text-mute hover:border-accent/40 hover:text-paper"

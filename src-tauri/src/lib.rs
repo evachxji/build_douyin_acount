@@ -87,6 +87,8 @@ pub fn run() {
             commands::tasks::resume_task,
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::ollama::check_ollama,
+            commands::ollama::start_ollama,
         ])
         .setup(|app| {
             // 后台 worker：串行消费 vision 任务队列（含失败退避重试）。

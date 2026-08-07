@@ -75,4 +75,6 @@ export const api = {
     call<{ platform: string; count: number; task_id: number }[]>("start_collection"),
   generateCopy: (assetId: number) => call<number>("generate_copy", { assetId }),
   getCopy: (assetId: number) => call<ContentCopy | null>("get_copy", { assetId }),
+  checkOllama: () => call<boolean>("check_ollama"),
+  startOllama: () => call<void>("start_ollama"),
 };
