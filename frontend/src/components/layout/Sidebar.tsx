@@ -1,14 +1,13 @@
 import { useAssetsStore } from "../../stores/assetsStore";
 import { statusMeta } from "../../lib/format";
 
-// 分析中不单独展示，归入"待处理"（NEW）。
+// 分析中不单独展示，归入"待处理"（NEW）；下载失败不展示。
 const STATUS_ORDER = [
   "NEW",
   "CANDIDATE",
   "SELECTED",
   "PUBLISHED",
   "ELIMINATED",
-  "DOWNLOAD_FAILED",
 ];
 
 export function Sidebar({ width }: { width: number }) {
