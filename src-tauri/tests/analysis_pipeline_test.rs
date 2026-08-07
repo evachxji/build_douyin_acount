@@ -390,6 +390,102 @@ impl FrameExtractor for AlwaysFailExtractor {
     }
 }
 
+struct EmptyAsr;
+impl Asr for EmptyAsr {
+    fn transcribe(&self, _wav: &std::path::Path) -> Result<Transcript, DomainError> {
+        Ok(Transcript {
+            text: String::new(),
+            language: "unknown".to_string(),
+        })
+    }
+}
+
+/// 综合阶段幻觉桩：只下发了 index 2，却额外返回未要求的 index 1 且命中。
+struct HallucinatingLlm;
+impl Llm for HallucinatingLlm {
+    fn synthesize(&self, _req: SynthesisRequest) -> Result<AnalysisJson, DomainError> {
+        Ok(AnalysisJson {
+            category: "其他".to_string(),
+            tags: vec![],
+            quality_score: 80,
+            has_foreign_language: false,
+            has_large_amount_english_subtitle: false,
+            summary: "s".to_string(),
+            recommended_caption: "c".to_string(),
+            conditions: vec![
+                build_douyin_acount_lib::analysis::llm::IndexVerdict {
+                    index: 1,
+                    hit: true,
+                    basis: "画面".to_string(),
+                },
+                build_douyin_acount_lib::analysis::llm::IndexVerdict {
+                    index: 2,
+                    hit: false,
+                    basis: String::new(),
+                },
+            ],
+        })
+    }
+
+    fn judge_conditions(
+        &self,
+        _title: Option<&str>,
+        _asr_text: &str,
+        _asr_language: Option<&str>,
+        _items: &[(usize, String)],
+    ) -> Result<Vec<build_douyin_acount_lib::analysis::llm::IndexVerdict>, DomainError> {
+        Ok(Vec::new())
+    }
+
+    fn classify_condition_bases(
+        &self,
+        _conditions: &[String],
+    ) -> Result<std::collections::HashMap<String, build_douyin_acount_lib::domain::analysis::ConditionBasis>, DomainError> {
+        Ok(std::collections::HashMap::new())
+    }
+}
+
+#[test]
+fn pipeline_ignores_hallucinated_verdict_for_unasked_audio_condition() {
+    use std::collections::HashMap;
+
+    // 复现：ASR 为空 -> 音频类排除未进入综合判定；模型幻觉返回了它的命中。
+    let dir = tempfile::tempdir().expect("tempdir");
+    let video = dir.path().join("v.mp4");
+    std::fs::write(&video, b"fake").expect("write");
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).expect("workdir");
+    let basis = HashMap::from([(
+        "长对话".to_string(),
+        build_douyin_acount_lib::domain::analysis::ConditionBasis::Audio,
+    )]);
+    let pipeline = AnalysisPipeline::new(
+        Arc::new(FakeExtractor),
+        Arc::new(EmptyAsr),
+        Arc::new(FakeVision),
+        Arc::new(HallucinatingLlm),
+    );
+    let result = pipeline
+        .analyze(
+            &video,
+            &work,
+            42,
+            None,
+            &[],
+            &["长对话".to_string(), "大量非中文字幕".to_string()],
+            &basis,
+        )
+        .expect("analyze");
+    assert!(
+        !result.condition_results.iter().any(|v| v.name == "长对话"),
+        "未下发的音频条件不得出现幻觉判定: {:?}",
+        result.condition_results
+    );
+    assert_eq!(result.condition_results.len(), 1);
+    assert_eq!(result.condition_results[0].name, "大量非中文字幕");
+    assert!(!result.condition_results[0].hit);
+}
+
 // ---- AiClient 与 Ollama 协议：本地 mock 服务器 ----
 
 fn spawn_mock_llm(body: String) -> String {

@@ -259,7 +259,7 @@ impl super::pipeline::Llm for OllamaLlm {
             .collect::<Vec<_>>()
             .join("\n");
         let user = format!(
-            "视频标题：{}\n音频转写（语言：{}）：\n{}\n\n请仅依据上述标题与音频转写逐条判定以下条件是否命中（不要推测画面内容）：\n{lines}\n\n输出严格 JSON：{{\"conditions\": [{{\"index\": 编号, \"hit\": true或false}}]}}",
+            "视频标题：{}\n音频转写（语言：{}）：\n{}\n\n请仅依据上述标题与音频转写逐条判定以下条件是否命中（不要推测画面内容）：\n{lines}\n\n注意：音频转写可能混有背景音乐歌词。若条件针对对话/旁白/说话内容（如 长对话、非中文对话、英文对话），明显的歌词/吟唱（押韵、重复、片段化、旋律性）不计入，一律判定未命中；若条件针对歌曲/音乐本身（如 英文歌曲、BGM），则照常依据转写判定。\n\n输出严格 JSON：{{\"conditions\": [{{\"index\": 编号, \"hit\": true或false}}]}}",
             title.unwrap_or("未知"),
             asr_language.unwrap_or("unknown"),
             asr_text

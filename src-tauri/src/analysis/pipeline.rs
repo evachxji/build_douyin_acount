@@ -188,6 +188,8 @@ impl AnalysisPipeline {
             .skip(audio_excludes.len())
             .map(|(i, c)| (i + 1, c.clone()))
             .collect();
+        // 实际下发的条件编号集合：用于丢弃模型幻觉返回的未要求编号。
+        let asked: std::collections::HashSet<usize> = other_items.iter().map(|(i, _)| *i).collect();
         let json = self.llm.synthesize(SynthesisRequest {
             frames: insights,
             asr_text: transcript.as_ref().map(|t| t.text.clone()),
@@ -196,7 +198,14 @@ impl AnalysisPipeline {
             conditions: other_items,
         })?;
         let mut condition_results = audio_verdicts;
-        condition_results.extend(resolve_conditions(&json.conditions, &ordered_names));
+        // 只接受实际下发过的条件编号：模型可能返回未要求的编号（幻觉），
+        // 直接映射回 ordered_names 会让未判定条件（如空转写时的音频条件）被误标命中。
+        let asked_verdicts: Vec<crate::analysis::llm::IndexVerdict> = json
+            .conditions
+            .into_iter()
+            .filter(|v| asked.contains(&v.index))
+            .collect();
+        condition_results.extend(resolve_conditions(&asked_verdicts, &ordered_names));
         Ok(NewAnalysis {
             asset_id,
             category: Some(json.category),
