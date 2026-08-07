@@ -16,6 +16,9 @@ PC 端 AI 短视频运营助手（Windows 桌面应用）：从 TikTok / Instagr
 # 开发（根目录，自动拉起前端 vite + Tauri）
 pnpm tauri dev
 
+# 打包正式版（产物在 src-tauri/target/release/bundle/）
+pnpm tauri build
+
 # 后端测试 / lint（先停掉运行中的 app，否则 Windows 下 exe 被锁导致链接失败）
 Get-Process build_douyin_acount,cargo -ErrorAction SilentlyContinue | Stop-Process -Force
 cd src-tauri
@@ -38,7 +41,7 @@ pnpm vitest run src/lib/format.test.ts   # 单个测试文件
 pnpm build        # tsc 类型检查 + vite 打包（无 eslint，类型检查靠它）
 ```
 
-前置外部依赖：Ollama（`qwen2.5vl:7b` + `qwen2.5:7b`）、FFmpeg、yt-dlp、Node（sidecar）、opencli（浏览器桥接，daemon 端口 19825）。路径均可在应用设置页/`app_settings` 表配置。
+前置外部依赖：Ollama（`qwen2.5vl:7b` + `qwen2.5:7b`）、FFmpeg、yt-dlp、Node（sidecar）、Whisper（`scripts/whisper-server/.venv`，faster-whisper Python 环境）、opencli（浏览器桥接，daemon 端口 19825）。路径均可在应用设置页/`app_settings` 表配置。
 
 ## 架构要点
 
@@ -74,7 +77,8 @@ pnpm build        # tsc 类型检查 + vite 打包（无 eslint，类型检查�
 - **`window.confirm` 在 WebView2 会静默返回 false**：删除等确认必须用 `@tauri-apps/plugin-dialog` 的 `ask()`。
 - **PowerShell 内联含中文的脚本会因 GBK 崩溃**：含中文的脚本一律写成文件再执行；读 `docs/` 的 UTF-8 文档用 `Get-Content -Encoding UTF8`。
 - **测试不依赖真实外部进程**：`src-tauri/tests/fixtures/` 有 `fake_collect.cjs` / `fake_publish.cjs`（假 sidecar）和 `sample_1s.mp4`；测试用 `tempfile::tempdir()` 建独立 storage。新加 collector/publisher 相关测试时复用这套桩。
-- **Whisper ASR 会静默失败**：`whisper_python` 必须解析为绝对路径（相对路径在应用进程里找不到脚本）；CUDA 库缺失时已做 CPU 回退。改 ASR 相关代码后必须用真实视频验证一次转写，失败不会抛出明显错误。
+- **采集完成统计以 `imported.jsonl` 行数为准**：sidecar 逐条追加 `videos.jsonl`、Agent 在 RUNNING 阶段已增量导入大部分视频，任务 Done 时若只统计最终轮新增会把累计数算成 0/1（`imported` 与 `first_asset` 都犯过）。统计须在清理临时目录前读 `imported.jsonl`；回归测试 `collector_imported_is_task_total_not_final_round`（`fake_collect_batch.cjs` 分批时序）守护此行为。
+- **Whisper ASR 会静默失败**：sidecar 是 `scripts/whisper-server/whisper_transcribe.py`（faster-whisper），`whisper_python` 必须解析为绝对路径（相对路径在应用进程里找不到脚本）；CUDA 库缺失时已做 CPU 回退。改 ASR 相关代码后必须用真实视频验证一次转写，失败不会抛出明显错误。
 - **本机调试脚本（`storage/logs/*.py`，gitignored，仅此机器存在）**：`cdp_helper.py`（经 WebView2 CDP 驱动运行中的应用：`list|eval|click|shot`，需启动 app 前设 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222 --remote-allow-origins=*'`）、`status_snapshot.py`（库/任务快照）、`watch_progress.py`（盯采集 progress.json）、`export_ig_cookies.py`（IG 下载 cookie 导出，需先完全关闭 Chrome）。
 - **安全红线（验收标准）**：不得引入对抖音发布按钮的自动点击；发布完成标记只能由用户手动确认触发；自动化识别不到表单元素时必须停止并提示，不得盲目操作。
 
