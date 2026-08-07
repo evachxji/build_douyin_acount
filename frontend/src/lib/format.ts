@@ -68,6 +68,7 @@ export function taskTypeLabel(type: string): string {
     analyze: "视频分析",
     prepare_publish: "准备发布",
     collect_batch: "批量采集",
+    generate_copy: "生成文案",
   };
   return map[type] ?? type;
 }

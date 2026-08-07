@@ -189,7 +189,6 @@ export function TaskQueuePanel({ height }: { height: number }) {
         <span className="w-10 shrink-0 tabular-nums">尝试</span>
         <span className="w-20 shrink-0">创建时间</span>
         <span className="w-20 shrink-0">结束时间</span>
-        <span className="w-20 shrink-0">素材状态</span>
         <span className="w-20 shrink-0">状态</span>
         <span className="w-14 shrink-0">操作</span>
         <span className="min-w-0 flex-1">结果</span>
@@ -198,7 +197,7 @@ export function TaskQueuePanel({ height }: { height: number }) {
         {tasks.length === 0 && (
           <li className="px-2 py-6 text-center text-xs text-mute">暂无任务</li>
         )}
-        {tasks.slice(0, 30).map((t) => {
+        {tasks.slice(0, 200).map((t) => {
           const cached = assetCacheRef.current.get(Number(t.payload.asset_id));
           return (
             <li
@@ -226,13 +225,6 @@ export function TaskQueuePanel({ height }: { height: number }) {
                 {TERMINAL_STATUSES.includes(t.status)
                   ? formatDateTime(t.updated_at)
                   : "—"}
-              </span>
-              <span className="w-20 shrink-0">
-                {cached ? (
-                  <StatusBadge status={cached.status} />
-                ) : (
-                  <span className="text-mute">—</span>
-                )}
               </span>
               <span className="w-20 shrink-0">
                 <StatusBadge status={t.status} />
