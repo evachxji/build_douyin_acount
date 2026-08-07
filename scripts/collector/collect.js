@@ -217,9 +217,16 @@ async function collectTiktok() {
       process.exit(2);
     }
     if (index >= job.count) break;
-    index += 1;
     const outBase = path.join(job.outputDir, `tt_${e.id}`);
-    const file = await ytdlpDownload(e.url, outBase);
+    let file;
+    try {
+      file = await ytdlpDownload(e.url, outBase);
+    } catch (err) {
+      // 单条下载失败只跳过，不中断整轮采集。
+      writeProgress({ message: `下载失败跳过: ${e.url}` });
+      continue;
+    }
+    index += 1;
     recordVideo({
       index,
       platform: "tiktok",
@@ -247,19 +254,36 @@ async function collectInstagram() {
       process.exit(2);
     }
     const url = await runOpencliRaw(["browser", session, "get", "url"]).catch(() => "");
+    // 用户关闭了采集标签页：get url 已为死会话创建 about:blank 幽灵页，立即清理并按取消退出。
+    if (String(url).trim() === "about:blank") {
+      await runOpencli(["browser", session, "close"]).catch(() => {});
+      writeProgress({ state: "cancelled", message: "浏览器标签页已关闭，采集中止" });
+      process.exit(2);
+    }
     const clean = String(url).replace(/[?#].*$/, "");
     const m = /\/reels\/([A-Za-z0-9_-]+)\/?$/.exec(clean);
     if (m && !candidates.has(m[1])) {
       candidates.set(m[1], { id: m[1], url: `https://www.instagram.com/reels/${m[1]}/` });
     }
+    writeProgress({ message: `刷流收集候选 ${candidates.size}/${need}` });
     await runOpencliRaw(["browser", session, "keys", "ArrowDown"]).catch(() => {});
     await new Promise((r) => setTimeout(r, 2600));
   }
 
   // 阶段2：逐条打开单 reels 页，页面内 info API 拿 CDN 直链与元数据。
+  let resolveIndex = 0;
   for (const cand of candidates.values()) {
     if (markerExists(job.cancelFile)) {
       writeProgress({ state: "cancelled", message: "用户取消" });
+      process.exit(2);
+    }
+    resolveIndex += 1;
+    writeProgress({ message: `获取直链 ${resolveIndex}/${candidates.size}` });
+    // 用户关页检测：tab list 不会复活幽灵页（get url 会），为空即中止。
+    const tabs = await runOpencli(["browser", session, "tab", "list"]).catch(() => []);
+    const tabArr = Array.isArray(tabs) ? tabs : tabs?.tabs ?? [];
+    if (!tabArr.some((t) => String(t.url || "").startsWith("http"))) {
+      writeProgress({ state: "cancelled", message: "浏览器标签页已关闭，采集中止" });
       process.exit(2);
     }
     await runOpencli(["browser", session, "open", cand.url]).catch(() => {});
@@ -279,6 +303,7 @@ async function collectInstagram() {
   await runOpencli(["browser", session, "close"]).catch(() => {});
 
   // 阶段3：赞数过滤 + 直链下载。
+  writeProgress({ message: "直链获取完成，开始下载" });
   let index = 0;
   for (const cand of candidates.values()) {
     if (markerExists(job.cancelFile)) {
@@ -291,9 +316,16 @@ async function collectInstagram() {
       continue;
     }
     if (cand.likeCount != null && cand.likeCount > job.maxLikes) continue;
-    index += 1;
     const outBase = path.join(job.outputDir, `ig_${cand.id}`);
-    const file = await ytdlpDownloadDirect(cand.videoUrl, outBase);
+    let file;
+    try {
+      file = await ytdlpDownloadDirect(cand.videoUrl, outBase);
+    } catch (e) {
+      // 单条 CDN 直链下载失败（过期/403/限流常见）只跳过，不中断整轮采集。
+      writeProgress({ message: `下载失败跳过: ${cand.url}` });
+      continue;
+    }
+    index += 1;
     recordVideo({
       index,
       platform: "instagram",
@@ -312,6 +344,15 @@ async function collectInstagram() {
 
 async function main() {
   writeProgress({ state: "running", message: `开始采集 ${job.platform}` });
+  // 心跳：Rust agent 靠 progress.json 的 mtime 判断 sidecar 是否存活
+  // （应用重启会带走 sidecar 进程，running 状态不变 → 僵尸任务）。
+  const heartbeat = setInterval(() => {
+    try {
+      const now = new Date();
+      fs.utimesSync(job.progressFile, now, now);
+    } catch {}
+  }, 5000);
+  heartbeat.unref();
   if (job.platform === "tiktok") {
     await collectTiktok();
   } else if (job.platform === "instagram") {

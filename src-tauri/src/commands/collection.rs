@@ -2,7 +2,7 @@ use serde_json::json;
 use tauri::State;
 
 use crate::db::repos::tasks::TasksRepo;
-use crate::domain::error::ApiError;
+use crate::domain::error::{ApiError, DomainError};
 use crate::state::AppState;
 
 /// 开始一轮采集：按设置中的配额（每轮条数 / TT 比例 / IG 比例 / 点赞上限）
@@ -23,6 +23,13 @@ pub fn start_collection(state: State<AppState>) -> Result<Vec<serde_json::Value>
     let ig_count = ((batch_size as f64) * ig_ratio / total_ratio).round() as i64;
 
     let repo = TasksRepo::new(&state.db);
+    // 防并发：已有采集任务在进行/排队时拒绝重复发起（TT/IG 共享一个浏览器，并发互相抢占）。
+    if repo.has_active("collector")? {
+        return Err(DomainError::InvalidData(
+            "已有采集任务在进行或排队中，请先等待完成或取消。".to_string(),
+        )
+        .into());
+    }
     let mut out = Vec::new();
     for (platform, count) in [("tiktok", tt_count), ("instagram", ig_count)] {
         if count <= 0 {

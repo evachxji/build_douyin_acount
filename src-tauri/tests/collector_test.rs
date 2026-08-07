@@ -140,3 +140,79 @@ fn collector_surfaces_failure() {
     let err = env.agent.run(&ctx, task).expect_err("must fail");
     assert!(err.to_string().contains("boom"), "{err}");
 }
+
+#[test]
+fn collector_maps_sidecar_cancelled_to_cancelled_outcome() {
+    // 用户关闭浏览器标签页（sidecar 上报 cancelled）-> AgentOutcome::Cancelled，终态不重试。
+    let env = setup(1);
+    let dir = env
+        .store
+        .root()
+        .join("collect")
+        .join(env.task_id.to_string());
+    std::fs::create_dir_all(&dir).expect("dir");
+    std::fs::write(
+        dir.join("progress.json"),
+        serde_json::to_string(&json!({ "state": "cancelled", "message": "浏览器标签页已关闭" })).unwrap(),
+    )
+    .expect("progress");
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Cancelled(_)), "{outcome:?}");
+}
+
+#[test]
+fn collector_respawns_when_sidecar_heartbeat_stale() {
+    // 僵尸场景：progress.json 显示 running，但 mtime 停在 2 分钟前（sidecar 已被应用重启带走）。
+    let env = setup(1);
+    let dir = env
+        .store
+        .root()
+        .join("collect")
+        .join(env.task_id.to_string());
+    std::fs::create_dir_all(&dir).expect("dir");
+    let progress = dir.join("progress.json");
+    std::fs::write(
+        &progress,
+        serde_json::to_string(
+            &json!({ "state": "running", "downloaded": 0, "target": 1, "message": "stale" }),
+        )
+        .unwrap(),
+    )
+    .expect("progress");
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&progress)
+        .expect("open");
+    file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+        .expect("set mtime");
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    // 心跳超时 -> 走失败分支：清目录、消耗一次尝试（不在本轮重拉，保证串行）。
+    let err = env.agent.run(&ctx, task).expect_err("stale must fail");
+    assert!(err.to_string().contains("无心跳"), "{err}");
+    assert!(!progress.exists(), "失败后应清空临时目录");
+    // 下一轮认领：progress.json 缺失（Missing）-> 重拉 sidecar。
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run 2");
+    assert!(matches!(outcome, AgentOutcome::Continue));
+    // 假 sidecar 应已被重新拉起并写出新的进度。
+    let mut respawned = false;
+    for _ in 0..30 {
+        if let Ok(raw) = std::fs::read_to_string(&progress) {
+            if raw.contains("fake collect") {
+                respawned = true;
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    assert!(respawned, "sidecar should have been respawned");
+}

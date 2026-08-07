@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::collections::HashSet;
+use std::time::Duration;
 
 use serde_json::json;
 
@@ -100,9 +101,10 @@ fn spawn_sidecar(
     let dir = collect_dir(&ctx.store, task.id);
     std::fs::create_dir_all(dir.join("jobs"))?;
     let job_path = dir.join("jobs").join("job.json");
+    let count = task.payload["count"].as_i64().unwrap_or(10);
     let job = json!({
         "platform": task.payload["platform"].as_str().unwrap_or("tiktok"),
-        "count": task.payload["count"].as_i64().unwrap_or(10),
+        "count": count,
         "maxLikes": task.payload["maxLikes"].as_i64().unwrap_or(1_000_000),
         "taskId": task.id,
         "outputDir": output_dir(&ctx.store, task.id),
@@ -113,6 +115,16 @@ fn spawn_sidecar(
         "ytdlpPath": self_agent.ytdlp,
     });
     std::fs::write(&job_path, serde_json::to_string_pretty(&job)?)?;
+    // 先写 running 占位再拉起进程：避免下一轮 run_once 在 sidecar 写出进度前重复 spawn。
+    std::fs::write(
+        progress_path(&ctx.store, task.id),
+        serde_json::to_string(&json!({
+            "state": "running",
+            "downloaded": 0,
+            "target": count,
+            "message": "启动采集 sidecar",
+        }))?,
+    )?;
     Command::new(&self_agent.node)
         .arg(&self_agent.script)
         .arg(&job_path)
@@ -220,10 +232,21 @@ impl Agent for CollectorAgent {
 
     fn run(&self, ctx: &AgentContext, task: AgentTask) -> Result<AgentOutcome, DomainError> {
         let progress_file = progress_path(&ctx.store, task.id);
-        let state = read_progress(&progress_file)?;
+        let mut state = read_progress(&progress_file)?;
         if state == CollectorState::Missing {
             spawn_sidecar(ctx, &task, self)?;
             return Ok(AgentOutcome::Continue);
+        }
+        // 活性检查：sidecar 每 5s 心跳 touch 一次 progress.json；
+        // mtime 超过阈值还显示 running，说明进程已被带走（如应用重启），按失败处理走自动重拉。
+        if state == CollectorState::Running {
+            let stale = std::fs::metadata(&progress_file)
+                .and_then(|m| m.modified())
+                .map(|t| t.elapsed().unwrap_or_default() > Duration::from_secs(60))
+                .unwrap_or(false);
+            if stale {
+                state = CollectorState::Failed("sidecar 无心跳（进程已退出）".to_string());
+            }
         }
         match state {
             CollectorState::Running => {
@@ -231,6 +254,21 @@ impl Agent for CollectorAgent {
                 if let Err(e) = import_new_videos(ctx, task.id) {
                     let _ = crate::db::repos::tasks::TasksRepo::new(ctx.db)
                         .add_log(task.id, "WARN", &format!("增量导入失败（下轮重试）：{e}"));
+                }
+                // 透传 sidecar 进度到任务 payload，供任务面板显示当前进度。
+                if let Ok(raw) = std::fs::read_to_string(&progress_file) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        let _ = crate::db::repos::tasks::TasksRepo::new(ctx.db).update_payload(
+                            task.id,
+                            json!({
+                                "progress": {
+                                    "downloaded": v["downloaded"].as_i64().unwrap_or(0),
+                                    "target": v["target"].as_i64().unwrap_or(0),
+                                    "message": v["message"].as_str().unwrap_or(""),
+                                }
+                            }),
+                        );
+                    }
                 }
                 Ok(AgentOutcome::Continue)
             }
@@ -259,17 +297,19 @@ impl Agent for CollectorAgent {
                     "first_asset": first_asset,
                 })))
             }
-            CollectorState::Cancelled => Err(DomainError::InvalidData("采集已取消。".to_string())),
+            CollectorState::Cancelled => Ok(AgentOutcome::Cancelled(json!({
+                "reason": "采集已取消（用户请求取消或关闭了浏览器标签页）",
+            }))),
             CollectorState::Failed(msg) => {
-                // 重试次数未耗尽时：清空临时目录并立即重新拉起 sidecar，
-                // 同时返回 Err 消耗一次尝试（runtime 会指数退避后重新认领）。
+                // 不在此处重拉 sidecar：清空临时目录后返回 Err 消耗一次尝试，
+                // 由 runtime 退避后重新认领、经 Missing 分支重拉——
+                // 保证同一时刻只有一个采集 sidecar（TT/IG 共享浏览器，并发互相抢占）。
                 if task.attempts < task.max_attempts {
                     let dir = collect_dir(&ctx.store, task.id);
                     if dir.is_dir() {
                         let _ = std::fs::remove_dir_all(&dir);
                     }
-                    spawn_sidecar(ctx, &task, self)?;
-                    Err(DomainError::InvalidData(format!("采集失败，已自动重启采集：{msg}")))
+                    Err(DomainError::InvalidData(format!("采集失败，将自动重试：{msg}")))
                 } else {
                     Err(DomainError::InvalidData(format!("采集失败：{msg}")))
                 }

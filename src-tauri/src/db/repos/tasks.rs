@@ -153,6 +153,19 @@ impl<'a> TasksRepo<'a> {
     }
 
     /// 向任务 payload 合并字段（保留执行字段 draft_id/asset_id），供前端读取阶段信息。
+    /// 是否有进行中（PENDING/RUNNING）的任务：采集按钮防重，避免并发 sidecar 抢占浏览器。
+    pub fn has_active(&self, agent_name: &str) -> Result<bool, DomainError> {
+        let conn = self.db.conn();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM agent_tasks
+                WHERE agent_name = ?1 AND status IN ('PENDING','RUNNING'))",
+            params![agent_name],
+            |r| r.get(0),
+        )?;
+        Ok(exists)
+    }
+
     pub fn update_payload(&self, id: i64, patch: serde_json::Value) -> Result<(), DomainError> {
         let conn = self.db.conn();
         let current: Option<String> = conn
