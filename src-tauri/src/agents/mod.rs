@@ -19,6 +19,8 @@ pub enum AgentOutcome {
     Succeeded(serde_json::Value),
     /// 需要人工审批。
     WaitingForHuman(serde_json::Value),
+    /// 用户中止（如关闭了浏览器标签页）：任务置 CANCELLED 终态，不重试。
+    Cancelled(serde_json::Value),
     /// 本轮无终态：任务保持 RUNNING，worker 下一轮继续轮询（用于等待外部变化）。
     Continue,
 }

@@ -116,6 +116,59 @@ fn filter_exclude_any_eliminates_with_reason() {
 }
 
 #[test]
+fn eliminate_reason_text_maps_verdicts() {
+    // 排除条件命中 -> 带条件名
+    let rules = FilterRules {
+        exclude_conditions: vec!["色情".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "色情".to_string(), hit: true, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    let d = FilterAgent::evaluate(&a, &rules).expect("ok");
+    assert_eq!(
+        FilterAgent::eliminate_reason_text(&d, &a, &rules).as_deref(),
+        Some("排除条件命中：色情")
+    );
+    // 命中条件全部未命中
+    let rules = FilterRules {
+        hit_conditions: vec!["宠物".to_string()],
+        ..FilterRules::default()
+    };
+    let a = NewAnalysis {
+        condition_results: vec![
+            ConditionVerdict { name: "宠物".to_string(), hit: false, basis: "画面".to_string() },
+        ],
+        ..sample_analysis(1)
+    };
+    let d = FilterAgent::evaluate(&a, &rules).expect("ok");
+    assert_eq!(
+        FilterAgent::eliminate_reason_text(&d, &a, &rules).as_deref(),
+        Some("命中条件全部未命中")
+    );
+    // 质量分低于保留线 -> 带分数与线
+    let rules = FilterRules::default();
+    let a = NewAnalysis {
+        quality_score: Some(45),
+        ..sample_analysis(1)
+    };
+    let d = FilterAgent::evaluate(&a, &rules).expect("ok");
+    assert_eq!(d.verdict, FilterVerdict::LowPriority);
+    assert_eq!(
+        FilterAgent::eliminate_reason_text(&d, &a, &rules).as_deref(),
+        Some("质量分 45 低于保留线 60")
+    );
+    // 保留 -> 无原因（用于清除旧记录）
+    let rules = FilterRules::default();
+    let a = sample_analysis(1);
+    let d = FilterAgent::evaluate(&a, &rules).expect("ok");
+    assert_eq!(FilterAgent::eliminate_reason_text(&d, &a, &rules), None);
+}
+
+#[test]
 fn filter_exclude_wins_over_hit() {
     let rules = FilterRules {
         hit_conditions: vec!["宠物".to_string()],
@@ -223,6 +276,30 @@ impl Agent for FakeFailAgent {
     fn run(&self, _ctx: &AgentContext, _task: build_douyin_acount_lib::domain::task::AgentTask) -> Result<AgentOutcome, DomainError> {
         Err(DomainError::InvalidData("boom".to_string()))
     }
+}
+
+struct FakeCancelAgent;
+impl Agent for FakeCancelAgent {
+    fn name(&self) -> &'static str {
+        "fake_cancel"
+    }
+    fn run(&self, _ctx: &AgentContext, _task: build_douyin_acount_lib::domain::task::AgentTask) -> Result<AgentOutcome, DomainError> {
+        Ok(AgentOutcome::Cancelled(serde_json::json!({"reason": "user closed tab"})))
+    }
+}
+
+#[test]
+fn runtime_marks_cancelled_task_terminal_no_retry() {
+    let (dir, db, _store) = setup();
+    let mut rt = AgentRuntime::new(&db, MediaStore::new(dir.path().join("storage")));
+    rt.register(Box::new(FakeCancelAgent));
+    let tasks = TasksRepo::new(&db);
+    let id = tasks.enqueue("fake_cancel", "t", serde_json::json!({}), false).expect("enqueue");
+    assert!(rt.run_once("fake_cancel").expect("run").is_processed());
+    assert_eq!(tasks.get(id).expect("get").expect("some").status, TaskStatus::Cancelled);
+    // 终态不可再被认领（不会重试）。
+    assert!(tasks.claim_next("fake_cancel").expect("claim").is_none());
+    let _ = dir;
 }
 
 #[test]
