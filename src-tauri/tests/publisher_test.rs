@@ -223,7 +223,8 @@ fn publisher_finalizes_when_sidecar_detects_success() {
 }
 
 #[test]
-fn publisher_fails_when_browser_closed_before_publish() {
+fn publisher_cancels_when_browser_closed_before_publish() {
+    // 用户关闭标签页 = 取消（终态），不再按失败重试。
     let env = setup();
     write_progress(&env, "browser_closed", "window closed");
     let ctx = AgentContext {
@@ -231,8 +232,21 @@ fn publisher_fails_when_browser_closed_before_publish() {
         store: env.store.clone(),
     };
     let task = claim(&env);
-    let err = env.agent.run(&ctx, task).expect_err("must fail");
-    assert!(err.to_string().contains("浏览器标签页已关闭"), "{err}");
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Cancelled(_)), "{outcome:?}");
+}
+
+#[test]
+fn publisher_cancels_when_sidecar_cancelled() {
+    let env = setup();
+    write_progress(&env, "cancelled", "用户取消");
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Cancelled(_)), "{outcome:?}");
 }
 
 #[test]

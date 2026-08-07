@@ -143,11 +143,13 @@ async function closeSession() {
   await runOpencli(["browser", session, "close"]).catch(() => {});
 }
 
-/** 探测标签页是否仍存活（用户关闭标签页后会话失效）。 */
+/** 探测标签页是否仍存活（用户关闭标签页后会话失效）。
+ *  用 tab list 而非 get url：daemon 会为无活页的会话自动创建 about:blank 幽灵页。 */
 async function sessionAlive() {
   try {
-    const url = await runOpencliRaw(["browser", session, "get", "url"]);
-    return url.startsWith("http");
+    const res = await runOpencli(["browser", session, "tab", "list"]);
+    const tabs = Array.isArray(res) ? res : res?.tabs ?? [];
+    return tabs.some((t) => String(t.url || "").startsWith("http"));
   } catch {
     return false;
   }
@@ -171,6 +173,148 @@ async function waitSelector(selector, timeoutMs, intervalMs = 3000) {
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   return null;
+}
+
+/** 键入话题脚本：光标归尾后用 execCommand 插入文本（不点击编辑器——
+ *  点击可能选中已有话题卡片，键入会把它替换掉）。 */
+function buildTypeTagScript(tag) {
+  return `(() => {
+    const ed = document.querySelector('[contenteditable=true]');
+    if (!ed) return false;
+    ed.focus();
+    const sel = window.getSelection();
+    sel.selectAllChildren(ed);
+    sel.collapseToEnd();
+    return document.execCommand('insertText', false, ' #' + ${JSON.stringify(tag)});
+  })()`;
+}
+
+/** 话题联想一站式脚本（异步，页面内完成全部等待，消除 opencli 往返开销）：
+ *  等联想项出现(≤2.5s) -> 点选 -> 等卡片成型(≤2s)。
+ *  返回 'carded' / 'no-suggestion' / 'clicked-no-card' / 'no-editor'。
+ *  联想区是编辑器内联推荐面板（tag-hash-* 哈希类名），不依赖容器类名匹配；
+ *  卡片成型标记是编辑器内的 [data-mention] 元素（文本含空格/nbsp，比较前一律剥掉）。 */
+function buildTopicApplyScript(tag) {
+  return `(async () => {
+    const tag = ${JSON.stringify(tag)};
+    const norm = (s) => (s || "").replace(/[\\s]/g, "").replace(/^[#＃]/, "");
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const ed = document.querySelector('[contenteditable=true]');
+    if (!ed) return 'no-editor';
+    const carded = () =>
+      [...ed.querySelectorAll("[data-mention]")].some((m) => norm(m.textContent) === tag);
+    const findItem = () => {
+      const items = [];
+      for (const el of document.querySelectorAll("body *")) {
+        if (el.offsetParent === null) continue;
+        if (ed.contains(el)) continue;
+        if (norm(el.textContent) !== tag) continue;
+        items.push(el);
+      }
+      if (!items.length) return null;
+      // 优先联想区（类名含 tag-hash）内文本最短的（最内层）元素。
+      items.sort((a, b) => {
+        const ah = String(a.className || "").includes("tag-hash") ? 0 : 1;
+        const bh = String(b.className || "").includes("tag-hash") ? 0 : 1;
+        return ah - bh || a.textContent.length - b.textContent.length;
+      });
+      return items[0];
+    };
+    if (carded()) return 'carded';
+    let item = null;
+    for (let i = 0; i < 5 && !item; i += 1) {
+      item = findItem();
+      if (!item) await sleep(500);
+    }
+    if (!item) return carded() ? 'carded' : 'no-suggestion';
+    item.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    item.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    item.click();
+    for (let i = 0; i < 8; i += 1) {
+      if (carded()) return 'carded';
+      await sleep(250);
+    }
+    return 'clicked-no-card';
+  })()`;
+}
+
+/** 自主声明一站式脚本（异步，页面内完成全部等待与点击）：
+ *  点【自主声明】→【内容为转载】→【取材站外】→【确定】。
+ *  返回 'declared' 或失败位置（'no-entry'/'no-repost'/'no-source'/'no-confirm'）。
+ *  全部按可见文本精确匹配；识别不到元素即中止（不盲目操作），由进度消息提示人工处理。 */
+function buildDeclarationScript(labels) {
+  return `(async () => {
+    const L = ${JSON.stringify(labels)};
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // 可交互元素优先级：radio/button/带 role 的最高，addon 次之，普通 div/span 最低。
+    const interactiveScore = (el) => {
+      const tag = (el.tagName || "").toUpperCase();
+      const role = el.getAttribute && el.getAttribute("role");
+      if (["BUTTON", "LABEL", "A", "INPUT", "SELECT"].includes(tag) || role) return 0;
+      if ((el.className || "").includes("addon")) return 1;
+      return 2;
+    };
+    const clickText = async (text, scope, tries = 6) => {
+      for (let i = 0; i < tries; i += 1) {
+        const els = [];
+        for (const el of (scope || document).querySelectorAll("*")) {
+          if (el.offsetParent === null) continue;
+          if ((el.textContent || "").trim() !== text) continue;
+          els.push(el);
+        }
+        if (els.length) {
+          els.sort(
+            (a, b) =>
+              interactiveScore(a) - interactiveScore(b) ||
+              a.textContent.length - b.textContent.length,
+          );
+          const t = els[0];
+          t.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+          t.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+          t.click();
+          return true;
+        }
+        await sleep(500);
+      }
+      return false;
+    };
+    // 1. 展开【自主声明】
+    if (!(await clickText(L.entry))) return 'no-entry';
+    await sleep(800);
+    // 2. 选择【内容为转载】
+    if (!(await clickText(L.repost))) return 'no-repost';
+    await sleep(800);
+    // 3. 选择【取材站外】
+    if (!(await clickText(L.source))) return 'no-source';
+    await sleep(500);
+    // 4. 点【确定】（优先弹窗容器内的按钮，避免误点页面上其他"确定"）
+    const dialogs = [...document.querySelectorAll('[class*="modal"], [class*="dialog"], [role="dialog"]')]
+      .filter((d) => d.offsetParent !== null);
+    let confirmed = false;
+    for (const d of dialogs) {
+      if (clickText(L.confirm, d)) { confirmed = true; break; }
+    }
+    if (!confirmed && !(await clickText(L.confirm))) return 'no-confirm';
+    await sleep(500);
+    // 校验：弹窗关闭，且声明栏文本已变为所选声明（防误点到别的选项）。
+    const modalGone = !document.querySelector(".semi-modal");
+    const box = document.querySelector('[class*="selectText"]');
+    const boxText = box ? (box.textContent || "").trim() : "";
+    if (!modalGone || !boxText.includes(L.repost.slice(0, 4))) return 'verification-failed';
+    return 'declared';
+  })()`;
+}
+
+/** 插入 #话题 并一站式点选联想项；以卡片成型（[data-mention]）为成功标准，失败保留纯文本。 */
+async function applyTopicTag(tag) {
+  const typed = await runOpencli(["browser", session, "eval", buildTypeTagScript(tag)]).catch(() => null);
+  if (typed !== true && typed?.result !== true && typed?.value !== true) return false;
+  const res = await runOpencli(["browser", session, "eval", buildTopicApplyScript(tag)]).catch(() => null);
+  const s = typeof res === "string" ? res : res?.result ?? res?.value;
+  if (s === "carded") return true;
+  // 未成型：关掉可能残留的联想，保留的纯文本话题由进度消息提示人工处理。
+  await runOpencli(["browser", session, "keys", "Escape"]).catch(() => {});
+  return false;
 }
 
 async function fillComposer() {
@@ -197,20 +341,40 @@ async function fillComposer() {
   if (editorRef === null) {
     throw new Error("未找到文案输入区，页面结构可能已改版");
   }
-  // 抖音编辑器/ opencli fill 在 contenteditable 上会稳定丢掉输入串的最后一个字符，
-  // 因此在末尾补一个尾随空格（丢了也只是空格；同时让最后一个话题卡片完整提交）。
-  const captionParts = [job.body || "", ...(job.hashtags || []).map((t) => `#${t}`)];
+  // 抖音编辑器 / opencli fill 在 contenteditable 上会稳定丢掉输入串的最后一个字符，
+  // 因此在末尾补一个尾随空格（丢了也只是空格）。
   const captionResult = await runOpencliFill([
     "browser",
     session,
     "fill",
     String(editorRef),
-    captionParts.filter(Boolean).join(" ") + " ",
+    (job.body || "") + " ",
   ]);
   if (!captionResult?.filled) {
     throw new Error("文案填写失败（页面可能已改版）");
   }
-  writeProgress("form_filled", "标题/文案/话题已填写，请人工核对后点击页面上的【发布】");
+  // 话题逐个键入并点选联想下拉项：纯文本 #话题 在抖音编辑器里不生效。
+  const tagFailed = [];
+  for (const raw of job.hashtags || []) {
+    const tag = String(raw).trim().replace(/^[#＃]/, "");
+    if (!tag) continue;
+    if (!(await applyTopicTag(tag))) tagFailed.push(`#${tag}`);
+  }
+  // 自主声明：内容为转载 -> 取材站外 -> 确定（识别不到元素即提示人工，不盲目操作）。
+  const decl = await runOpencli([
+    "browser", session, "eval", buildDeclarationScript(SELECTORS.declaration),
+  ]).catch(() => null);
+  const declState = typeof decl === "string" ? decl : decl?.result ?? decl?.value;
+  const warns = [];
+  if (tagFailed.length) {
+    warns.push(`以下话题未能联想选中，仍是纯文本（不生效），请人工点选：${tagFailed.join("、")}`);
+  }
+  if (declState !== "declared") {
+    warns.push("自主声明未能自动完成，请人工点选：自主声明 → 内容为转载信息 → 取材站外 → 确定");
+  }
+  const declText = declState === "declared" ? "，自主声明已选【内容为转载信息/取材站外】" : "";
+  const warn = warns.length ? `；${warns.join("；")}` : "";
+  writeProgress("form_filled", `标题/文案/话题已填写${declText}，请人工核对后点击页面上的【发布】${warn}`);
 }
 
 async function monitorAfterFill() {
@@ -224,6 +388,7 @@ async function monitorAfterFill() {
     }
     if (!(await sessionAlive())) {
       writeProgress("browser_closed", "浏览器标签页已关闭，未完成发布");
+      await runOpencli(["browser", session, "close"]).catch(() => {}); // 释放会话租约
       return "browser_closed";
     }
     try {
@@ -236,6 +401,8 @@ async function monitorAfterFill() {
       ]);
       if ((res?.entries ?? []).some((e) => e.visible)) {
         writeProgress("published", "页面出现「发布成功」提示");
+        // 页面留给用户，解除会话租约：之后用户关窗不会触发 daemon 复活空白页。
+        await runOpencli(["browser", session, "unbind"]).catch(() => {});
         return "published";
       }
     } catch {

@@ -218,10 +218,16 @@ impl Agent for PublisherAgent {
             SidecarState::Failed(msg) => Err(DomainError::InvalidData(format!(
                 "发布 sidecar 失败：{msg}"
             ))),
-            SidecarState::BrowserClosed => Err(DomainError::InvalidData(
-                "浏览器标签页已关闭，未完成发布。如需重试请重新「准备发布」。".to_string(),
-            )),
-            SidecarState::Cancelled => Err(DomainError::InvalidData("发布任务已取消。".to_string())),
+            SidecarState::BrowserClosed => Ok(AgentOutcome::Cancelled(json!({
+                "draft_id": draft_id,
+                "asset_id": asset_id,
+                "reason": "浏览器标签页已关闭，发布流程中止。",
+            }))),
+            SidecarState::Cancelled => Ok(AgentOutcome::Cancelled(json!({
+                "draft_id": draft_id,
+                "asset_id": asset_id,
+                "reason": "发布任务已取消。",
+            }))),
             SidecarState::WaitingForFile => {
                 // 选文件阶段不设人工放行节点：把阶段信息写入任务 payload 供前端展示，
                 // 任务保持 RUNNING，由 sidecar 自动检测页面变化并填表。

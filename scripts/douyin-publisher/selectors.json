@@ -32,5 +32,12 @@
     "text=发布成功",
     "text=已发布"
   ],
-  "publishListUrlPart": "/creator-micro/content"
+  "publishListUrlPart": "/creator-micro/content",
+  "declaration": {
+    "_comment": "自主声明流程的可见文本（页面改版时在此调整，按文本精确匹配点击）",
+    "entry": "请选择自主声明",
+    "repost": "内容为转载信息",
+    "source": "取材站外",
+    "confirm": "确定"
+  }
 }
