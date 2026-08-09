@@ -55,7 +55,7 @@ function App() {
     });
   const resizeRight = (d: number) =>
     setRightWidth((w) => {
-      const next = clamp(w - d, 280, 640);
+      const next = clamp(w - d, 280, 960);
       persistLayout("rightWidth", next);
       return next;
     });
@@ -72,9 +72,9 @@ function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar width={leftWidth} />
         <ResizeHandle direction="vertical" onResize={resizeLeft} />
-        <Waterfall />
+        <DetailPanel />
         <ResizeHandle direction="vertical" onResize={resizeRight} />
-        <DetailPanel width={rightWidth} />
+        <Waterfall width={rightWidth} />
       </div>
       {taskOpen && (
         <>

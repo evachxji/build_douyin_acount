@@ -10,7 +10,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api/client";
 import type { AnalysisResult, ContentCopy } from "../../api/types";
 
-export function DetailPanel({ width }: { width: number }) {
+export function DetailPanel() {
   const focusId = useSelectionStore((s) => s.focusId);
   const assets = useAssetsStore((s) => s.assets);
   const removeAsset = useAssetsStore((s) => s.removeAsset);
@@ -79,11 +79,8 @@ export function DetailPanel({ width }: { width: number }) {
 
   if (!asset) {
     return (
-      <aside
-        style={{ width }}
-        className="flex shrink-0 flex-col items-center justify-center border-l border-line bg-panel/60 text-sm text-mute"
-      >
-        点击左侧素材查看详情
+      <aside className="flex min-w-0 flex-1 flex-col items-center justify-center bg-panel/60 text-sm text-mute">
+        点击右侧素材查看详情
       </aside>
     );
   }
@@ -164,10 +161,7 @@ export function DetailPanel({ width }: { width: number }) {
   };
 
   return (
-    <aside
-      style={{ width }}
-      className="flex shrink-0 flex-col border-l border-line bg-panel/60"
-    >
+    <aside className="flex min-w-0 flex-1 flex-col bg-panel/60">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="p-4">
         <video
@@ -180,7 +174,10 @@ export function DetailPanel({ width }: { width: number }) {
 
       <div className="px-4">
         <div className="flex items-start justify-between gap-2">
-          <h2 className="text-sm font-semibold leading-snug text-paper">
+          <h2
+            className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug text-paper"
+            title={asset.title ?? `视频 #${asset.id}`}
+          >
             {asset.title ?? `视频 #${asset.id}`}
           </h2>
           <StatusBadge status={asset.status} />

@@ -11,7 +11,7 @@ interface DragState {
   cy: number;
 }
 
-export function Waterfall() {
+export function Waterfall({ width }: { width: number }) {
   const assets = useAssetsStore((s) => s.assets);
   const loading = useAssetsStore((s) => s.loading);
   const error = useAssetsStore((s) => s.error);
@@ -133,9 +133,12 @@ export function Waterfall() {
       : null;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div
+      style={{ width }}
+      className="flex shrink-0 flex-col border-l border-line"
+    >
       <main
-        className="flex-1 select-none overflow-y-auto p-4"
+        className="@container flex-1 select-none overflow-y-auto p-4"
         onMouseDown={(e) => {
           if (e.button !== 0) return;
           if (e.target instanceof Element && e.target.closest("[data-asset-id]")) return;
@@ -166,7 +169,7 @@ export function Waterfall() {
         ) : (
           <div
             ref={gridRef}
-            className="relative grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+            className="relative grid grid-cols-1 gap-4 @md:grid-cols-2 @xl:grid-cols-3 @2xl:grid-cols-4"
           >
             {assets.map((asset) => (
               <VideoCard
