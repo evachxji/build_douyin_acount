@@ -53,3 +53,77 @@ select option {
 video {
   background-color: #000;
 }
+
+/* 详情页「通过/淘汰」过渡动画 */
+.detail-transition-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  animation: detail-overlay-in 0.25s ease-out both;
+}
+.detail-transition-badge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 9999px;
+  font-size: 46px;
+  line-height: 1;
+  animation: detail-badge-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.detail-transition-badge::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  animation: detail-badge-ring 0.55s ease-out 0.15s both;
+}
+.detail-transition-overlay[data-action="approve"] .detail-transition-badge {
+  background: rgba(127, 176, 105, 0.18);
+  border: 2px solid var(--color-ok);
+  color: var(--color-ok);
+}
+.detail-transition-overlay[data-action="eliminate"] .detail-transition-badge {
+  background: rgba(209, 96, 61, 0.18);
+  border: 2px solid var(--color-bad);
+  color: var(--color-bad);
+}
+@keyframes detail-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes detail-badge-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes detail-badge-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.65);
+    opacity: 0;
+  }
+}

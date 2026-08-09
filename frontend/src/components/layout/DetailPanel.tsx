@@ -5,13 +5,14 @@ import { videoUrl } from "../../api/urls";
 import { formatCount, formatDuration, platformLabel } from "../../lib/format";
 import { ScoreBadge } from "../ScoreBadge";
 import { StatusBadge } from "../StatusBadge";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api/client";
 import type { AnalysisResult, ContentCopy } from "../../api/types";
 
 export function DetailPanel() {
   const focusId = useSelectionStore((s) => s.focusId);
+  const focus = useSelectionStore((s) => s.focus);
   const assets = useAssetsStore((s) => s.assets);
   const removeAsset = useAssetsStore((s) => s.removeAsset);
   const updateStatus = useAssetsStore((s) => s.updateStatus);
@@ -23,6 +24,8 @@ export function DetailPanel() {
   const [busy, setBusy] = useState(false);
   const [copying, setCopying] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [transition, setTransition] = useState<{ action: "approve" | "eliminate" } | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const asset = assets.find((a) => a.id === focusId) ?? null;
 
@@ -37,6 +40,43 @@ export function DetailPanel() {
     void api.getAnalysis(asset.id).then(setAnalysis).catch(() => setAnalysis(null));
     void api.getCopy(asset.id).then(setCopy).catch(() => setCopy(null));
   }, [asset?.id, asset]);
+
+  // 原生 <video controls> 的键盘快捷键只在视频元素聚焦时生效；点击全屏按钮后焦点留在按钮上，
+  // 按空格会触发按钮（keyup 激活，keydown 的 preventDefault 挡不住）退出全屏、方向键也失效。
+  // 进入全屏时把焦点移回视频元素（等价于手动点一下画面），原生快捷键即恢复；
+  // 仅当视频未聚焦（原生未接管）时，keydown 兜底处理空格/方向键，避免与原生双重触发。
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const onFsChange = () => {
+      if (document.fullscreenElement === el) el.focus();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (document.fullscreenElement !== el) return;
+      // 视频自身聚焦时原生快捷键在 capture 阶段已接管，此处若再处理会双重触发（如空格一下暂停又立刻播放）。
+      if (document.activeElement === el) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (el.paused) void el.play().catch(() => {});
+        else el.pause();
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        el.currentTime = Math.max(0, (el.currentTime || 0) - 5);
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        const next = (el.currentTime || 0) + 5;
+        el.currentTime = Number.isFinite(el.duration) ? Math.min(el.duration, next) : next;
+      }
+    };
+    el.addEventListener("fullscreenchange", onFsChange);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      el.removeEventListener("fullscreenchange", onFsChange);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [asset?.file_path]);
 
   // 准备发布后保持 loading，直到「请选择视频文件」弹窗出现（publisher 任务 stage=file）。
   // 60 秒超时兜底，避免任务异常时按钮一直转。
@@ -77,10 +117,20 @@ export function DetailPanel() {
     }
   };
 
+  // 过渡蒙层独立于素材存在：通过/淘汰后若当前素材被筛选列表移除，空态分支也要继续显示动画。
+  const transitionOverlay = transition ? (
+    <div className="detail-transition-overlay" data-action={transition.action}>
+      <div className="detail-transition-badge">
+        {transition.action === "approve" ? "✓" : "✕"}
+      </div>
+    </div>
+  ) : null;
+
   if (!asset) {
     return (
-      <aside className="flex min-w-0 flex-1 flex-col items-center justify-center bg-panel/60 text-sm text-mute">
+      <aside className="relative flex min-w-0 flex-1 flex-col items-center justify-center bg-panel/60 text-sm text-mute">
         点击右侧素材查看详情
+        {transitionOverlay}
       </aside>
     );
   }
@@ -110,9 +160,41 @@ export function DetailPanel() {
   const handleStatusAction = async () => {
     if (!nextStatus) return;
     await updateStatus(asset.id, nextStatus);
-    // 用户「通过」候选素材 -> 待发布，并自动生成 AI 文案。
+  };
+
+  // 候选素材「通过/淘汰」：先播过渡动画，动画结束后自动切换到下一个候选视频。
+  // 期间用户若手动切换了素材，则不再自动跳转。
+  const handleTransitionalStatus = async (to: string) => {
+    const id = asset.id;
+    setTransition(
+      to === "SELECTED" ? { action: "approve" } : to === "ELIMINATED" ? { action: "eliminate" } : null,
+    );
+    try {
+      await updateStatus(id, to);
+      // 用户「通过」候选素材 -> 待发布，并自动生成 AI 文案。
+      if (to === "SELECTED") void api.generateCopy(id).catch(() => {});
+    } catch (e) {
+      setTransition(null);
+      throw e;
+    }
+    window.setTimeout(() => {
+      setTransition(null);
+      if (useSelectionStore.getState().focusId !== id) return;
+      const all = useAssetsStore.getState().assets;
+      const idx = all.findIndex((a) => a.id === id);
+      const next =
+        all.slice(idx + 1).find((a) => a.status === "CANDIDATE") ??
+        all.find((a) => a.status === "CANDIDATE");
+      if (next) focus(next.id);
+    }, 700);
+  };
+
+  const onStatusAction = () => {
+    // 候选素材的「通过」走动画过渡 + 自动跳转；其余状态流转保持原行为。
     if (asset.status === "CANDIDATE" && nextStatus === "SELECTED") {
-      void api.generateCopy(asset.id).catch(() => {});
+      void handleTransitionalStatus("SELECTED");
+    } else {
+      void handleStatusAction();
     }
   };
 
@@ -161,11 +243,12 @@ export function DetailPanel() {
   };
 
   return (
-    <aside className="flex min-w-0 flex-1 flex-col bg-panel/60">
+    <aside className="relative flex min-w-0 flex-1 flex-col bg-panel/60">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="p-4">
         <video
           key={asset.file_path}
+          ref={videoRef}
           src={videoUrl(asset.file_path)}
           controls
           className="aspect-video w-full rounded-lg border border-line bg-black"
@@ -307,16 +390,16 @@ export function DetailPanel() {
         )}
         {statusActionLabel && nextStatus && (
           <button
-            onClick={() => void handleStatusAction()}
+            onClick={onStatusAction}
             className="h-9 rounded border border-accent bg-accent/10 px-3 text-sm text-accent hover:bg-accent/20"
             title={asset.status === "CANDIDATE" ? "标记为待发布并自动生成 AI 文案" : undefined}
           >
             {statusActionLabel}
           </button>
         )}
-        {asset.status === "CANDIDATE" && (
+        {(asset.status === "CANDIDATE" || asset.status === "SELECTED") && (
           <button
-            onClick={() => void updateStatus(asset.id, "ELIMINATED")}
+            onClick={() => void handleTransitionalStatus("ELIMINATED")}
             className="h-9 rounded border border-bad/40 px-3 text-sm text-bad hover:bg-bad/10"
             title="标记为淘汰，不再参与发布"
           >
@@ -347,6 +430,7 @@ export function DetailPanel() {
           删除
         </button>
       </div>
+      {transitionOverlay}
     </aside>
   );
 }
