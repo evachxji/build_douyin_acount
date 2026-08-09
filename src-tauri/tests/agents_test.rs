@@ -465,6 +465,68 @@ fn vision_agent_analyzes_asset_and_marks_ready() {
 }
 
 #[test]
+fn vision_agent_skips_manually_eliminated_asset() {
+    // 排队中素材被用户手工淘汰（eliminate_reason=手工淘汰）：分析任务应取消，不复活素材。
+    let (dir, db, store) = setup();
+    let video = dir.path().join("v.mp4");
+    std::fs::write(&video, b"fake").expect("video");
+    let assets = AssetsRepo::new(&db);
+    let asset_id = assets
+        .insert(NewAsset {
+            dedup_key: Some("tiktok:elim1".to_string()),
+            file_path: video.to_string_lossy().into_owned(),
+            cover_path: None,
+            source_platform: "tiktok".to_string(),
+            source_url: None,
+            author: None,
+            title: None,
+            description: None,
+            published_at: None,
+            tags: vec![],
+            likes: 0,
+            comments: 0,
+            plays: 0,
+            duration_ms: 5000,
+        })
+        .expect("insert");
+    assets.update_status(asset_id, AssetStatus::Analyzing).expect("analyzing");
+    assets.update_status(asset_id, AssetStatus::Eliminated).expect("eliminate");
+    assets.set_eliminate_reason(asset_id, Some("手工淘汰")).expect("reason");
+
+    let pipeline = AnalysisPipeline::new(
+        Arc::new(FakeExtractor),
+        Arc::new(FakeAsr),
+        Arc::new(FakeVision),
+        Arc::new(FakeLlm),
+    );
+    let agent = build_douyin_acount_lib::agents::vision::VisionAgent::new(
+        pipeline,
+        FilterRules::default(),
+    );
+    let ctx = AgentContext { db: &db, store };
+    let task = build_douyin_acount_lib::domain::task::AgentTask {
+        id: 1,
+        agent_name: "vision".to_string(),
+        task_type: "analyze_asset".to_string(),
+        payload: serde_json::json!({"asset_id": asset_id}),
+        status: TaskStatus::Running,
+        attempts: 1,
+        max_attempts: 3,
+        next_retry_at: None,
+        human_required: false,
+        error: None,
+        created_at: "t".to_string(),
+        updated_at: "t".to_string(),
+    };
+    let outcome = agent.run(&ctx, task).expect("run");
+    // 任务置取消，素材保持 ELIMINATED，不被复活到 CANDIDATE。
+    assert!(matches!(outcome, AgentOutcome::Cancelled(_)), "{outcome:?}");
+    let asset = assets.get(asset_id).expect("get").expect("some");
+    assert_eq!(asset.status, AssetStatus::Eliminated);
+    assert_eq!(asset.eliminate_reason.as_deref(), Some("手工淘汰"));
+}
+
+#[test]
 fn filter_agent_standalone_updates_status_from_db() {
     let (dir, db, store) = setup();
     let asset_id = AssetsRepo::new(&db)

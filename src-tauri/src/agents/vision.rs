@@ -33,6 +33,13 @@ impl Agent for VisionAgent {
         let asset = assets
             .get(asset_id)?
             .ok_or(DomainError::AssetNotFound(asset_id))?;
+        // 用户已手工淘汰该素材（明确否决）：放弃本次分析，不复活素材，任务置取消。
+        if asset.eliminate_reason.as_deref() == Some("手工淘汰") {
+            return Ok(AgentOutcome::Cancelled(serde_json::json!({
+                "asset_id": asset_id,
+                "reason": "素材已被手工淘汰，跳过分析",
+            })));
+        }
         // 逐条导入已把资产置为 ANALYZING，重试时无需（也不允许）重复迁移。
         if asset.status != AssetStatus::Analyzing {
             assets.update_status(asset_id, AssetStatus::Analyzing)?;
@@ -81,6 +88,18 @@ impl Agent for VisionAgent {
         let decision = FilterAgent::evaluate(&analysis, &rules)?;
         let reason_text = FilterAgent::eliminate_reason_text(&decision, &analysis, &rules);
         AnalysesRepo::new(ctx.db).upsert(analysis)?;
+        // 分析期间用户可能已手工淘汰该素材：以最新状态为准，不复活。
+        let latest = assets.get(asset_id)?;
+        if latest
+            .as_ref()
+            .map(|a| a.eliminate_reason.as_deref() == Some("手工淘汰"))
+            .unwrap_or(false)
+        {
+            return Ok(AgentOutcome::Cancelled(serde_json::json!({
+                "asset_id": asset_id,
+                "reason": "分析期间素材被手工淘汰",
+            })));
+        }
         let status = FilterAgent::verdict_status(decision.verdict);
         assets.update_status(asset_id, status)?;
         assets.set_eliminate_reason(asset_id, reason_text.as_deref())?;

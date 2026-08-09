@@ -251,7 +251,10 @@ export function DetailPanel({ width }: { width: number }) {
             )}
             {(analysis.has_foreign_language || analysis.has_large_amount_english_subtitle) && (
               <p className="text-xs text-bad">
-                ⚠ 判定为英文内容（对白占比高 / 大量英文字幕），已按规则标记为淘汰。
+                ⚠ 检测到外语内容（对白语言：
+                {analysis.has_foreign_language ? (analysis.asr_language || "外语") : "未知"}
+                {analysis.has_large_amount_english_subtitle ? " / 大量外文字幕" : ""}
+                ）。是否淘汰取决于设置的排除条件与质量分，非外语即淘汰。
               </p>
             )}
           </div>

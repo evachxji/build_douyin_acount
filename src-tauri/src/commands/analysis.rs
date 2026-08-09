@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use crate::db::repos::assets::AssetsRepo;
 use crate::db::Database;
 use crate::db::repos::tasks::TasksRepo;
 use crate::domain::error::{ApiError, DomainError};
@@ -28,6 +29,8 @@ pub fn enqueue_analysis(db: &Database, asset_ids: &[i64]) -> Result<Vec<i64>, Do
         if active {
             continue;
         }
+        // 新的分析意图：清除旧的「手工淘汰」标记，使已淘汰素材可经 AI 分析重新评估。
+        let _ = AssetsRepo::new(db).set_eliminate_reason(*asset_id, None);
         TasksRepo::new(db).enqueue(
             "vision",
             "analyze",
