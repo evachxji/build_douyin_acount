@@ -224,6 +224,25 @@ fn asset_list_filters_by_status_and_category() {
 }
 
 #[test]
+fn asset_list_orders_by_last_update_desc() {
+    let db = test_db();
+    let assets = AssetsRepo::new(&db);
+    let a = assets.insert(sample_asset("a")).expect("insert a");
+    let b = assets.insert(sample_asset("b")).expect("insert b");
+
+    // 初始均为插入默认值：同秒并列时 id 大者（较新导入）在前。
+    let initial = assets.list(AssetFilter::default()).expect("list");
+    assert_eq!(initial[0].id, b);
+
+    // 操作 a（状态迁移把 updated_at 刷成 RFC3339）后 a 应排到最前——
+    // 两种时间格式（插入默认值空格分隔 / 更新写入 T 分隔）混排也必须正确。
+    assets.update_status(a, AssetStatus::Analyzing).expect("touch a");
+    let after = assets.list(AssetFilter::default()).expect("list");
+    assert_eq!(after[0].id, a, "最近操作的素材应排在最前");
+    assert_eq!(after[1].id, b);
+}
+
+#[test]
 fn asset_delete_cascades_analysis() {
     let db = test_db();
     let assets = AssetsRepo::new(&db);

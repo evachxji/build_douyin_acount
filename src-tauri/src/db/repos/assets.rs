@@ -125,7 +125,10 @@ impl<'a> AssetsRepo<'a> {
         Ok(asset)
     }
 
-    /// 按条件查询资产列表（category 为联表过滤）。
+    /// 按条件查询资产列表（category 为联表过滤），按最后操作时间（updated_at）倒序。
+    /// updated_at 有两种来源格式：插入时取列默认值 `datetime('now')`（空格分隔、秒级），
+    /// 更新时由本仓库写 RFC3339（T 分隔、含小数秒）；统一 REPLACE 成 T 分隔后字典序即时间序，
+    /// 同秒并列时 id 大者（较新导入）在前。
     pub fn list(&self, filter: AssetFilter) -> Result<Vec<VideoAsset>, DomainError> {
         let mut conditions: Vec<String> = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -164,7 +167,7 @@ impl<'a> AssetsRepo<'a> {
             "SELECT {ASSET_COLS} FROM video_assets va
              LEFT JOIN analysis_results ar ON ar.asset_id = va.id
              {where_sql}
-             ORDER BY va.created_at DESC LIMIT ? OFFSET ?"
+             ORDER BY REPLACE(va.updated_at, ' ', 'T') DESC, va.id DESC LIMIT ? OFFSET ?"
         );
         let conn = self.db.conn();
         let mut stmt = conn.prepare(&sql)?;
