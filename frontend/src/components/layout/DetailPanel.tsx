@@ -24,6 +24,12 @@ export function DetailPanel() {
   const [busy, setBusy] = useState(false);
   const [copying, setCopying] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  // 「准备中」兜底的固定 deadline：useEffect 会随 2.5s 轮询重跑，用 setTimeout(60s)
+  // 计时会被不断重置永不触发（曾导致取消后按钮永远卡在「准备中」）。
+  const publishDeadlineRef = useRef(0);
+  // 本次点击创建的任务 id：复位只认它，否则列表里上一次运行的终态任务会让
+  // loading 在点击后立刻被复位（表现为按钮毫无变化）。
+  const publishTaskIdRef = useRef<number | null>(null);
   const [transition, setTransition] = useState<{ action: "approve" | "eliminate" } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -78,35 +84,52 @@ export function DetailPanel() {
     };
   }, [asset?.file_path]);
 
-  // 准备发布后保持 loading，直到「请选择视频文件」弹窗出现（publisher 任务 stage=file）。
-  // 60 秒超时兜底，避免任务异常时按钮一直转。
+  // 准备发布后保持 loading，直到本次点击创建的任务进入可交互阶段
+  // （stage=file 兜底弹窗 / WAITING_FOR_HUMAN 待确认）或终态（含取消）；60s 固定 deadline 兜底。
   useEffect(() => {
-    if (!publishing) return;
-    const fileStage = tasks.some(
-      (t) =>
-        t.agent_name === "publisher" &&
-        t.payload.stage === "file" &&
-        (t.status === "RUNNING" || t.status === "PENDING"),
-    );
-    if (fileStage) {
+    if (!publishing || !asset) return;
+    const taskId = publishTaskIdRef.current;
+    const t = taskId == null ? undefined : tasks.find((t) => t.id === taskId);
+    if (
+      t &&
+      (t.payload.stage === "file" ||
+        t.status === "WAITING_FOR_HUMAN" ||
+        ["SUCCEEDED", "FAILED", "CANCELLED"].includes(t.status))
+    ) {
       setPublishing(false);
       return;
     }
-    const timer = setTimeout(() => setPublishing(false), 60_000);
+    const remain = publishDeadlineRef.current - Date.now();
+    if (remain <= 0) {
+      setPublishing(false);
+      return;
+    }
+    const timer = setTimeout(() => setPublishing(false), remain);
     return () => clearTimeout(timer);
-  }, [publishing, tasks]);
+  }, [publishing, tasks, asset]);
 
   const handleGenerateCopy = async () => {
     if (!asset) return;
+    const assetId = asset.id;
     setCopying(true);
     try {
-      await api.generateCopy(asset.id);
-      // 文案由后台 LLM 生成，轮询等待结果（最长 60 秒）。
-      for (let i = 0; i < 20; i += 1) {
-        await new Promise((r) => setTimeout(r, 3000));
-        const c = await api.getCopy(asset.id).catch(() => null);
-        if (c) {
-          setCopy(c);
+      const taskId = await api.generateCopy(assetId);
+      // 文案由后台 content agent 生成：轮询「任务状态」直到终态再取文案。
+      // 不能查文案是否存在——content_copies 按 asset upsert，旧文案 id/created_at 不变，
+      // 曾导致一点击就查到旧文案、按钮提前复位（新文案几秒后才静默换上）。
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const list = await api.listTasks().catch(() => []);
+        const t = list.find((t) => t.id === taskId);
+        if (!t) continue;
+        if (t.status === "SUCCEEDED") {
+          const c = await api.getCopy(assetId).catch(() => null);
+          // 用户中途切走时不把旧素材的文案写进新详情页。
+          if (c && useSelectionStore.getState().focusId === assetId) setCopy(c);
+          break;
+        }
+        if (t.status === "FAILED" || t.status === "CANCELLED") {
+          if (t.error) alert(t.error);
           break;
         }
       }
@@ -141,7 +164,7 @@ export function DetailPanel() {
       : asset.status === "SELECTED"
         ? "PUBLISHED"
         : asset.status === "PUBLISHED"
-          ? "CANDIDATE"
+          ? "SELECTED"
           : asset.status === "ELIMINATED"
             ? "CANDIDATE"
             : null;
@@ -231,10 +254,12 @@ export function DetailPanel() {
 
   const handlePreparePublish = async () => {
     setPublishing(true);
+    publishDeadlineRef.current = Date.now() + 60_000;
+    publishTaskIdRef.current = null;
     try {
-      await api.preparePublish(asset.id);
-      setTaskOpen(true);
-      // 任务入队后稍等后台 worker 拉起 sidecar，再刷新任务面板。
+      const res = await api.preparePublish(asset.id);
+      publishTaskIdRef.current = res.task_id;
+      // 任务入队后稍等后台 worker 拉起 sidecar，再刷新任务数据（不打开底部任务面板）。
       setTimeout(() => void useTaskStore.getState().refresh(), 1200);
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
