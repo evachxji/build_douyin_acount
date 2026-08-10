@@ -1,5 +1,6 @@
 // 测试用假 sidecar：模拟真实编排流程，不启动浏览器。
-// 状态流：browser_started -> waiting_for_file -> uploading -> form_filled（自动，无需人工放行）
+// 状态流：browser_started -> uploading -> form_filled（模拟自动上传注入成功）。
+// mode=hold：停在 waiting_for_file（自动上传失败的兜底态），供冒烟人工提示弹窗。
 // mode=published：等 confirm 标记后写 published。
 const fs = require("fs");
 const path = require("path");
@@ -22,16 +23,15 @@ async function main() {
     return;
   }
   await sleep(300);
-  write("waiting_for_file", "fake waiting: " + job.videoPath);
   if (mode === "hold") {
-    await sleep(60_000); // 停在选文件阶段，供冒烟验证信息弹窗
+    write("waiting_for_file", "fake fallback: " + job.videoPath);
+    await sleep(60_000); // 停在选文件兜底阶段，供冒烟验证信息弹窗
     return;
   }
   if (mode === "failed") {
     write("failed", "fake failure");
     process.exit(1);
   }
-  await sleep(400);
   write("uploading", "fake uploading");
   await sleep(400);
   write("form_filled", "fake form filled");

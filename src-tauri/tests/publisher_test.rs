@@ -1,4 +1,4 @@
-﻿//! Publisher Agent 集成测试：用假 sidecar 验证「自动检测选文件 -> 自动填表 ->
+﻿//! Publisher Agent 集成测试：用假 sidecar 验证「自动上传文件 -> 自动填表 ->
 //! 人工确认发布」的完整人机协作状态流。
 use std::path::{Path, PathBuf};
 
@@ -125,7 +125,7 @@ fn write_progress(env: &TestEnv, state: &str, message: &str) {
 #[test]
 fn publisher_file_stage_keeps_task_running_with_info_payload() {
     let env = setup();
-    // 预写 waiting_for_file：验证选文件阶段任务保持 RUNNING 且 payload 写入阶段信息。
+    // 预写 waiting_for_file（自动上传失败的兜底态）：验证任务保持 RUNNING 且 payload 写入阶段信息。
     write_progress(&env, "waiting_for_file", "waiting");
     let ctx = AgentContext {
         db: &env.db,
@@ -139,6 +139,8 @@ fn publisher_file_stage_keeps_task_running_with_info_payload() {
     assert_eq!(t.payload["stage"], "file");
     assert_eq!(t.payload["title"], "测试标题");
     assert_eq!(t.payload["path"], "videos/test.mp4");
+    // sidecar 的兜底提示消息透传到 payload，供前端弹窗展示。
+    assert_eq!(t.payload["message"], "waiting");
 }
 
 #[test]
@@ -148,7 +150,7 @@ fn publisher_spawns_sidecar_and_auto_fills() {
         db: &env.db,
         store: env.store.clone(),
     };
-    // 模拟 worker 每轮重新领取：sidecar 拉起后自动完成 waiting_for_file -> form_filled，
+    // 模拟 worker 每轮重新领取：sidecar 拉起后自动完成 uploading -> form_filled，
     // agent 在后续轮次看到 form_filled 进入 form_ready。
     let mut outcome = None;
     for _ in 0..20 {

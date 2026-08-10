@@ -25,11 +25,14 @@ function CopyPath({ path }: { path: string }) {
   );
 }
 
-/** 选文件阶段信息弹窗：任务 RUNNING 且 payload.stage=file 时展示（不阻塞流程）。 */
+/** 选文件阶段信息弹窗：任务 RUNNING 且 payload.stage=file 时展示（不阻塞流程）。
+ *  仅在 sidecar 自动上传注入失败的兜底路径出现。 */
 function FileStagePanel({ task }: { task: AgentTask }) {
   const cancel = useTaskStore((s) => s.cancel);
   const path = String(task.payload.path ?? "");
   const title = String(task.payload.title ?? "");
+  // sidecar 透传的兜底原因（自动上传未成功…）；为空时用通用说明。
+  const message = String(task.payload.message ?? "");
 
   // 弹窗出现时自动复制路径，用户直接粘贴。
   useEffect(() => {
@@ -41,8 +44,8 @@ function FileStagePanel({ task }: { task: AgentTask }) {
       <div className="w-[520px] rounded-xl border border-accent/40 bg-panel p-6 shadow-2xl">
         <h2 className="text-base font-bold text-paper">请选择视频文件</h2>
         <p className="mt-1 text-xs leading-relaxed text-mute">
-          在打开的抖音页面点击「上传视频」，在文件选择弹窗中粘贴路径（已自动复制）并选择文件。
-          选择后程序将自动填写标题/文案/话题，无需再点确认。
+          {message ||
+            "在打开的抖音页面点击「上传视频」，在文件选择弹窗中粘贴路径（已自动复制）并选择文件。选择后程序将自动填写标题/文案/话题，无需再点确认。"}
         </p>
         <div className="mt-3 space-y-2 text-sm">
           <div className="flex items-center gap-2">

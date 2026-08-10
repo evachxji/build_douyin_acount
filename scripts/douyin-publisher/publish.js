@@ -1,17 +1,23 @@
 // 抖音发布辅助 sidecar（opencli 编排版）：
 // 1. 在用户已登录的 Chrome 中打开 creator.douyin.com 上传页（opencli 会话）。
-// 2. 文件选择弹窗由用户本人操作：程序展示视频完整路径（可一键复制），
-//    用户选好文件后点击应用内【已选择】按钮（写入 continue 标记）。
-// 3. sidecar 检测到 continue 后，等待上传/转码完成，自动填写标题/文案/话题。
+// 2. 自动上传：sidecar 在 127.0.0.1 起一次性只读 HTTP 服务托管视频文件，
+//    页面内 eval 脚本 fetch 字节 -> 构造 File -> DataTransfer 赋给视频 file input
+//    -> dispatch change，上传组件照常接管。不弹原生文件选择框，无需人工粘贴路径。
+//    （opencli upload 的 CDP DOM.setFileInputFiles 被 Chrome 扩展调试会话拒绝——
+//    "Not allowed"；CDP 点击又无 user activation 开不了原生弹窗，故走内存注入。）
+//    注入失败/超时（页面改版、元素缺失、大文件内存不足）时回退人工流程：
+//    应用弹窗展示视频路径（自动复制），用户手动选择文件后程序继续。
+// 3. 等待上传/转码完成，自动填写标题/文案/话题。
 // 4. 【绝不点击最终发布按钮】——填表完成后保持窗口打开，等待用户本人核对并点击发布。
 // 5. 仅当页面出现显式「发布成功」提示才上报 published；窗口关闭/取消如实上报。
 //
 // 用法：node publish.js <job.json>
 // job.json 字段：draftId / videoPath / title / body / hashtags[] /
-//                progressFile / cancelFile / continueFile
+//                progressFile / cancelFile / confirmFile
 
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 
 const SELECTORS = JSON.parse(
@@ -131,15 +137,19 @@ async function openUploadPage() {
   }
 }
 
-/** 关闭会话标签页。 */
+/** 关闭会话标签页。抖音页通过 addEventListener 注册 beforeunload（JS 清不掉），
+ *  常规 close 会触发 Chrome「离开此网站？」确认框；且 close 释放租约后会话命令
+ *  就打不到弹窗残留页了（keys Enter 会落到 daemon 新建的幽灵页）——已实测踩坑。
+ *  故顺序必须：先 tab close 强关（chrome.tabs.remove 不触发 beforeunload 确认，
+ *  已实测验证），再 close 释放租约。tab list 只返回本会话的页，不会误关用户标签页。 */
 async function closeSession() {
-  // 清除页面 beforeunload，避免 Chrome 弹出「离开此网站」二次确认阻塞关闭。
-  await runOpencli([
-    "browser",
-    session,
-    "eval",
-    "window.onbeforeunload=null;window.onunload=null;true",
-  ]).catch(() => {});
+  const tabs = await runOpencli(["browser", session, "tab", "list"]).catch(() => null);
+  const list = Array.isArray(tabs) ? tabs : tabs?.tabs ?? [];
+  for (const t of list) {
+    if (t.page) {
+      await runOpencli(["browser", session, "tab", "close", String(t.page)]).catch(() => {});
+    }
+  }
   await runOpencli(["browser", session, "close"]).catch(() => {});
 }
 
@@ -317,11 +327,127 @@ async function applyTopicTag(tag) {
   return false;
 }
 
+/** 一次性只读视频文件服务：绑定 127.0.0.1 随机端口，只服务 /video 路径。
+ *  CORS + Private-Network-Access 头齐全（https 抖音页面 fetch 本地服务需要，
+ *  已在真实页面实测通过）。页面 fetch 完成后即可关闭。 */
+function startVideoServer(videoPath) {
+  const server = http.createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Private-Network", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (!req.url || !req.url.startsWith("/video")) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    const stat = fs.statSync(videoPath);
+    res.writeHead(200, {
+      "Content-Length": stat.size,
+      "Content-Type": "application/octet-stream",
+    });
+    fs.createReadStream(videoPath).pipe(res);
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+/** 注入脚本（发后即忘）：枚举页面 file input，按 accept 特征选视频上传框（多个且
+ *  无视频特征时拒绝注入——注错 input 上传不会开始），随后异步 fetch 本地服务字节、
+ *  构造 File 赋入并 dispatch change。脚本同步返回 'started'/'no-input'/
+ *  'no-video-input'——刻意不 await fetch：注入成功会触发抖音整页跳转作曲器，
+ *  await 会让 eval Promise 随旧文档销毁而 hang 到 execFile 超时（实测确认）。
+ *  注入是否生效由 pageReachedComposer 轮询判定，不依赖本脚本返回值。 */
+function buildInjectScript(url, fileName, mime) {
+  return `(() => {
+    const inputs = [...document.querySelectorAll("input[type='file']")];
+    if (!inputs.length) return "no-input";
+    const idx = inputs.findIndex((el) =>
+      /video|\\.mp4|\\.mov|\\.webm|\\.flv/i.test(el.getAttribute("accept") || ""));
+    if (idx < 0 && inputs.length > 1) return "no-video-input";
+    const input = inputs[idx >= 0 ? idx : 0];
+    fetch(${JSON.stringify(url)})
+      .then((resp) => {
+        if (!resp.ok) throw new Error("fetch " + resp.status);
+        return resp.arrayBuffer();
+      })
+      .then((buf) => {
+        if (!buf.byteLength) return;
+        const file = new File([buf], ${JSON.stringify(fileName)}, { type: ${JSON.stringify(mime)} });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      })
+      .catch(() => {});
+    return "started";
+  })()`;
+}
+
+/** 页面是否已进入作曲器（上传/转码完成或进行中）：URL 离开 upload 页或标题框已渲染。 */
+async function pageReachedComposer() {
+  const url = await runOpencliRaw(["browser", session, "get", "url"]).catch(() => "");
+  if (url.includes("/creator-micro/content/post")) return true;
+  const res = await runOpencli([
+    "browser", session, "find", "--css", SELECTORS.titleInputs[0],
+  ]).catch(() => null);
+  return (res?.entries ?? []).some((e) => e.visible);
+}
+
+/** 自动上传：本地服务托管视频 + 页面内 eval 内存注入（见文件头注释）。
+ *  返回是否注入成功；90s 内未进入作曲器则判定失败，由调用方回退人工。 */
+async function autoUploadVideo() {
+  if (!fs.existsSync(job.videoPath)) {
+    throw new Error(`视频文件不存在：${job.videoPath}`);
+  }
+  const fileName = path.basename(job.videoPath);
+  const mime = {
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".flv": "video/x-flv",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+  }[path.extname(fileName).toLowerCase()] || "video/mp4";
+  const server = await startVideoServer(job.videoPath);
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/video${path.extname(fileName)}`;
+    const deadline = Date.now() + 90_000;
+    let started = false;
+    while (Date.now() < deadline) {
+      if (markerExists(job.cancelFile)) throw new CancelRequested();
+      if (!(await sessionAlive())) throw new TabClosed("浏览器标签页已关闭");
+      // 注入生效（或用户手动选择了文件）：页面进入作曲器。
+      if (await pageReachedComposer()) return true;
+      if (!started) {
+        const res = await runOpencli([
+          "browser", session, "eval", buildInjectScript(url, fileName, mime),
+        ]).catch(() => null);
+        const v = typeof res === "string" ? res : res?.result ?? res?.value;
+        // started 之后不再重复发注入（避免命中作曲器页的重传 input 造成二次上传）。
+        if (v === "started") started = true;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    // deadline 前的循环可能被 eval 长往返挤压，最后再确认一次页面状态。
+    return await pageReachedComposer();
+  } finally {
+    server.close();
+  }
+}
+
 async function fillComposer() {
   // 上传/转码完成后作曲器出现标题输入框（placeholder 以「填写作品标题」开头）。
   const titleRef = await waitSelector(SELECTORS.titleInputs[0], 10 * 60 * 1000);
   if (titleRef === null) {
-    throw new Error("等待视频上传/转码完成超时（10 分钟）。请确认已在弹窗中选择视频文件。");
+    throw new Error("等待视频上传/转码完成超时（10 分钟）。请确认视频文件已成功上传到页面。");
   }
   writeProgress("uploading", "视频已上传完成，正在填写表单");
 
@@ -414,10 +540,18 @@ async function monitorAfterFill() {
 
 async function main() {
   writeProgress("browser_started", "正在打开抖音上传页（独立标签页）");
-  // 先写出 waiting_for_file：程序端立即弹出人工确认窗口并自动复制路径，
-  // 与标签页打开并行。选择视频后 douyin 页面进入作曲器，下面自动检测并填表。
-  writeProgress("waiting_for_file", "请在打开的抖音页面点击「上传视频」并选择视频文件，选择后程序将自动填写标题/文案/话题");
+  // 同名会话可能残留已关闭标签页的引用（上一轮取消/异常退出），open 会撞
+  // attach_failed——先幂等清理一次再打开（closeSession 含 beforeunload 弹窗处理）。
+  await closeSession();
   await openUploadPage();
+  // 自动上传：注入视频文件到页面 file input；失败回退人工（应用弹窗展示路径并自动复制）。
+  writeProgress("uploading", "正在自动上传视频文件（注入页面文件组件，无需人工选择）");
+  if (!(await autoUploadVideo())) {
+    writeProgress(
+      "waiting_for_file",
+      "自动上传未成功（页面可能已改版），请在打开的抖音页面点击「上传视频」手动选择视频文件，选择后程序将自动填写标题/文案/话题",
+    );
+  }
   // 自动检测：等待作曲器（标题输入框）出现即视为已选择并上传完成。
   await fillComposer();
   const result = await monitorAfterFill();

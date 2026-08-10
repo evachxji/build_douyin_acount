@@ -14,9 +14,11 @@ use crate::domain::task::AgentTask;
 /// Publisher Agent：辅助发布到 creator.douyin.com（人机协作）。
 ///
 /// 流程：
-/// 1. sidecar 在用户已登录的 Chrome 中新开上传页标签，等待用户手动选择视频文件；
-/// 2. 用户选好文件后点应用内【已选择】（写入 continue 标记），sidecar 自动填写
-///    标题/文案/话题并停在【发布】按钮前（WAITING_FOR_HUMAN）；
+/// 1. sidecar 在用户已登录的 Chrome 中新开上传页标签，自动把视频文件注入页面
+///    file input（opencli upload，底层 CDP DOM.setFileInputFiles）；注入失败时
+///    回退人工选择（waiting_for_file 阶段，前端弹窗展示路径）；
+/// 2. 上传/转码完成后 sidecar 自动填写标题/文案/话题并停在【发布】按钮前
+///    （WAITING_FOR_HUMAN）；
 /// 3. 用户核对后在浏览器中本人点击发布，再点应用内【我已发布】（写入 confirm 标记），
 ///    本 Agent 据此标记资产 PUBLISHED。
 ///
@@ -40,7 +42,8 @@ impl PublisherAgent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SidecarState {
     BrowserStarted,
-    WaitingForFile,
+    /// 自动上传失败的兜底态：等待用户手动选择文件，携带 sidecar 提示消息。
+    WaitingForFile(String),
     Uploading,
     FormFilled,
     Published,
@@ -59,7 +62,9 @@ fn read_progress(path: &Path) -> Result<SidecarState, DomainError> {
     let v: serde_json::Value = serde_json::from_str(&raw)?;
     Ok(match v["state"].as_str().unwrap_or("") {
         "browser_started" => SidecarState::BrowserStarted,
-        "waiting_for_file" => SidecarState::WaitingForFile,
+        "waiting_for_file" => SidecarState::WaitingForFile(
+            v["message"].as_str().unwrap_or("").to_string(),
+        ),
         "uploading" => SidecarState::Uploading,
         "form_filled" => SidecarState::FormFilled,
         "published" => SidecarState::Published,
@@ -228,7 +233,7 @@ impl Agent for PublisherAgent {
                 "asset_id": asset_id,
                 "reason": "发布任务已取消。",
             }))),
-            SidecarState::WaitingForFile => {
+            SidecarState::WaitingForFile(message) => {
                 // 选文件阶段不设人工放行节点：把阶段信息写入任务 payload 供前端展示，
                 // 任务保持 RUNNING，由 sidecar 自动检测页面变化并填表。
                 TasksRepo::new(ctx.db).update_payload(
@@ -237,6 +242,7 @@ impl Agent for PublisherAgent {
                         "stage": "file",
                         "title": draft.title,
                         "path": asset.file_path,
+                        "message": message,
                     }),
                 )?;
                 Ok(AgentOutcome::Continue)
