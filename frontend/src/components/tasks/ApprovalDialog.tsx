@@ -135,6 +135,11 @@ export function ApprovalDialog() {
                     {t.payload.message}
                   </p>
                 )}
+                {isPub && (
+                  <p className="mt-2 rounded border border-accent/25 bg-accent/5 p-2 text-xs leading-relaxed text-paper/85">
+                    提醒：封面、发布时间（定时）需在抖音页面手动配置，程序不会代为设置。
+                  </p>
+                )}
                 {t.error && <p className="mt-1 text-xs text-bad">{t.error}</p>}
                 <div className="mt-2 flex gap-2">
                   <button
