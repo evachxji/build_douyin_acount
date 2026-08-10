@@ -10,6 +10,7 @@ interface TasksState {
   timer: ReturnType<typeof setInterval> | null;
   refresh: () => Promise<void>;
   setOpen: (open: boolean) => void;
+  startPolling: () => void;
   resume: (id: number) => Promise<void>;
   cancel: (id: number) => Promise<void>;
 }
@@ -40,15 +41,15 @@ export const useTaskStore = create<TasksState>((set, get) => ({
 
   setOpen: (open) => {
     set({ open });
-    const { timer } = get();
-    if (open && !timer) {
-      const t = setInterval(() => void get().refresh(), 2500);
-      set({ timer: t });
-      void get().refresh();
-    } else if (!open && timer) {
-      clearInterval(timer);
-      set({ timer: null });
-    }
+  },
+
+  // 常驻轮询（App 启动时开启）：确认窗/兜底弹窗/按钮状态都依赖任务数据，
+  // 与底部任务面板是否打开无关。
+  startPolling: () => {
+    if (get().timer) return;
+    const t = setInterval(() => void get().refresh(), 2500);
+    set({ timer: t });
+    void get().refresh();
   },
 
   resume: async (id) => {

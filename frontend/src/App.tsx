@@ -29,6 +29,7 @@ function App() {
   const focusId = useSelectionStore((s) => s.focusId);
   const focus = useSelectionStore((s) => s.focus);
   const taskOpen = useTaskStore((s) => s.open);
+  const startTaskPolling = useTaskStore((s) => s.startPolling);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() => readLayout("leftWidth", 224));
   const [rightWidth, setRightWidth] = useState(() => readLayout("rightWidth", 380));
@@ -38,7 +39,8 @@ function App() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    startTaskPolling();
+  }, [load, startTaskPolling]);
 
   // 素材加载后默认聚焦第一张，方便直接看详情。
   useEffect(() => {
