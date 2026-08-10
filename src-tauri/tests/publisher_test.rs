@@ -265,6 +265,67 @@ fn publisher_surfaces_sidecar_failure() {
 }
 
 #[test]
+fn publisher_respawns_when_sidecar_heartbeat_stale() {
+    // 进度冻结在 uploading（模拟 sidecar 随应用重启被杀的僵尸任务）；
+    // 阈值归零 => 立即判定僵尸，应重拉 sidecar 并在 payload 计数。
+    let env = setup();
+    write_progress(&env, "uploading", "stuck mid-upload");
+    let agent = PublisherAgent::new("node", fixture("fake_publish.cjs"))
+        .with_stale_after(std::time::Duration::ZERO);
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Continue), "{outcome:?}");
+    let t = TasksRepo::new(&env.db).get(env.task_id).expect("get").expect("task");
+    assert_eq!(t.payload["respawns"], 1, "僵尸判定后应重拉 sidecar 并计数");
+}
+
+#[test]
+fn publisher_stale_sidecar_cancelled_after_max_respawns() {
+    // 已连续重拉 2 次仍无心跳 => 取消任务（终态），提示用户重新点击【准备发布】。
+    let env = setup();
+    write_progress(&env, "uploading", "stuck");
+    TasksRepo::new(&env.db)
+        .update_payload(env.task_id, json!({ "respawns": 2 }))
+        .expect("seed respawns");
+    let agent = PublisherAgent::new("node", fixture("fake_publish.cjs"))
+        .with_stale_after(std::time::Duration::ZERO);
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = agent.run(&ctx, task).expect("run");
+    match outcome {
+        AgentOutcome::Cancelled(v) => {
+            assert!(v["reason"].as_str().unwrap_or("").contains("无响应"), "{v}")
+        }
+        other => panic!("expected Cancelled, got {other:?}"),
+    }
+}
+
+#[test]
+fn publisher_never_respawns_form_filled_even_when_stale() {
+    // form_filled 是人工等待态（确认/取消走标记文件），sidecar 死了也不需要重拉。
+    let env = setup();
+    write_progress(&env, "form_filled", "filled");
+    let agent = PublisherAgent::new("node", fixture("fake_publish.cjs"))
+        .with_stale_after(std::time::Duration::ZERO);
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::WaitingForHuman(_)), "{outcome:?}");
+    let t = TasksRepo::new(&env.db).get(env.task_id).expect("get").expect("task");
+    assert!(t.payload.get("respawns").is_none(), "form_filled 不得计重拉次数");
+}
+
+#[test]
 fn clipboard_write_roundtrip() {
     let text = format!("video-path-test-{}", std::process::id());
     build_douyin_acount_lib::commands::publish::copy_to_clipboard(text.clone())

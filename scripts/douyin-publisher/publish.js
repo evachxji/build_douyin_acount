@@ -39,7 +39,11 @@ const OPENCLI_ENTRIES = [
 class CancelRequested extends Error {}
 class TabClosed extends Error {}
 
+// 最近一次进度：心跳定时器原样重写，保持 progress 文件 mtime 常新。
+let lastProgress = null;
+
 function writeProgress(state, message) {
+  lastProgress = { state, message: message || "" };
   const payload = {
     state,
     message: message || "",
@@ -48,6 +52,18 @@ function writeProgress(state, message) {
   fs.writeFileSync(job.progressFile, JSON.stringify(payload, null, 2));
   console.log(`[publisher] ${state} ${message || ""}`);
 }
+
+// 心跳：每 5s 重写一次当前进度。agent 端按 progress 文件 mtime 判活——进程死亡
+// （如随应用重启被杀）则 mtime 冻结，agent 据此判定僵尸并重新拉起 sidecar。
+const heartbeat = setInterval(() => {
+  if (!lastProgress) return;
+  try {
+    writeProgress(lastProgress.state, lastProgress.message);
+  } catch {
+    // 进度目录被清理等异常不影响主流程。
+  }
+}, 5000);
+heartbeat.unref();
 
 function markerExists(file) {
   return fs.existsSync(file);
@@ -151,6 +167,11 @@ async function closeSession() {
     }
   }
   await runOpencli(["browser", session, "close"]).catch(() => {});
+}
+
+/** 取消路径：释放会话租约，标签页保留给用户自行处置（不关闭、不弹离开确认）。 */
+async function releaseSession() {
+  await runOpencli(["browser", session, "unbind"]).catch(() => {});
 }
 
 /** 探测标签页是否仍存活（用户关闭标签页后会话失效）。
@@ -508,8 +529,8 @@ async function monitorAfterFill() {
   const navLog = path.join(logDir, `publisher-${job.draftId}-nav.log`);
   while (true) {
     if (markerExists(job.cancelFile)) {
-      writeProgress("cancelled", "用户取消，关闭浏览器标签页");
-      await closeSession();
+      writeProgress("cancelled", "用户取消，标签页已保留（可手动处置）");
+      await releaseSession();
       return "cancelled";
     }
     if (!(await sessionAlive())) {
@@ -560,8 +581,8 @@ async function main() {
 
 main().catch(async (err) => {
   if (err instanceof CancelRequested || markerExists(job.cancelFile)) {
-    writeProgress("cancelled", "用户取消，关闭浏览器标签页");
-    await closeSession();
+    writeProgress("cancelled", "用户取消，标签页已保留（可手动处置）");
+    await releaseSession();
     process.exit(2);
   }
   if (err instanceof TabClosed) {

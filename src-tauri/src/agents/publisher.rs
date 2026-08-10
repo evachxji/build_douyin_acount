@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use serde_json::json;
 
 use crate::agents::{Agent, AgentContext, AgentOutcome};
@@ -24,9 +25,16 @@ use crate::domain::task::AgentTask;
 ///
 /// 【安全红线】本 Agent 与 sidecar 永不点击最终发布按钮；发布完成状态只由
 /// 显式「发布成功」提示或用户本人确认产生。
+///
+/// 【僵尸恢复】sidecar 每 5s 心跳重写进度文件；进程死亡（如随应用重启被杀）则
+/// 文件 mtime 冻结。transient 态（browser_started/uploading/waiting_for_file）
+/// 超过阈值未更新即重拉 sidecar（同名会话先清理旧标签页），最多 2 次后取消任务。
+/// form_filled 不做此判定：那是人工等待态，确认/取消走标记文件，不依赖 sidecar 存活。
 pub struct PublisherAgent {
     node: String,
     script: PathBuf,
+    /// 进度文件心跳超时阈值（sidecar 心跳 5s，容忍多次丢失）。
+    stale_after: Duration,
 }
 
 impl PublisherAgent {
@@ -34,7 +42,14 @@ impl PublisherAgent {
         Self {
             node: node.into(),
             script,
+            stale_after: Duration::from_secs(45),
         }
+    }
+
+    /// 测试注入：阈值归零可立即触发僵尸判定路径。
+    pub fn with_stale_after(mut self, d: Duration) -> Self {
+        self.stale_after = d;
+        self
     }
 }
 
@@ -75,6 +90,14 @@ fn read_progress(path: &Path) -> Result<SidecarState, DomainError> {
         ),
         other => SidecarState::Failed(format!("unknown sidecar state: {other}")),
     })
+}
+
+/// 进度文件是否超过阈值未更新（mtime 冻结 = sidecar 进程已死）；文件不存在不算冻结。
+fn progress_stale(path: &Path, threshold: Duration) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .map(|t| t.elapsed().unwrap_or_default() > threshold)
+        .unwrap_or(false)
 }
 
 fn publish_dir(store: &crate::media::MediaStore) -> PathBuf {
@@ -207,6 +230,30 @@ impl Agent for PublisherAgent {
         if state == SidecarState::Missing {
             spawn_sidecar(ctx, draft_id, &asset, &draft, self)?;
             state = SidecarState::BrowserStarted;
+        }
+
+        // 僵尸恢复：transient 态进度文件超过阈值未更新（sidecar 已死，如应用重启时
+        // 被杀）则重拉 sidecar——同名会话的 closeSession 会先清理旧标签页，不会开重复页。
+        // 最多重拉 2 次，仍无心跳则取消任务（素材保持 SELECTED，可重新点击【准备发布】）。
+        // form_filled 与终态不在此列（确认/取消走标记文件，不依赖 sidecar 存活）；
+        // waiting_for_file 虽是人工等待，但 sidecar 必须活着监听页面变化，故纳入判定。
+        if matches!(
+            state,
+            SidecarState::BrowserStarted | SidecarState::Uploading | SidecarState::WaitingForFile(_)
+        ) && progress_stale(&progress_file, self.stale_after)
+        {
+            let respawns = task.payload["respawns"].as_i64().unwrap_or(0);
+            if respawns >= 2 {
+                return Ok(AgentOutcome::Cancelled(json!({
+                    "draft_id": draft_id,
+                    "asset_id": asset_id,
+                    "reason": "发布 sidecar 无响应（可能已随应用重启终止），请重新点击【准备发布】。",
+                })));
+            }
+            TasksRepo::new(ctx.db)
+                .update_payload(task.id, json!({ "respawns": respawns + 1 }))?;
+            spawn_sidecar(ctx, draft_id, &asset, &draft, self)?;
+            return Ok(AgentOutcome::Continue);
         }
 
         // 中间状态立即返回 Continue：任务保持 RUNNING，由 worker 每 2 秒重新领取轮询，
