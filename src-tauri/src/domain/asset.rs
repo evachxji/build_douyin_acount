@@ -32,7 +32,7 @@ impl AssetStatus {
             (Analyzing, New | Candidate | Eliminated | DownloadFailed) => true,
             (Candidate, Analyzing | Selected | Eliminated) => true,
             (Selected, Candidate | Published | Eliminated) => true,
-            (Published, Candidate) => true,
+            (Published, Candidate | Selected) => true,
             (Eliminated, New | Candidate | Analyzing) => true,
             (DownloadFailed, New | Eliminated) => true,
             _ => false,

@@ -18,7 +18,8 @@ fn asset_status_allows_documented_transitions() {
     // SELECTED（待发布）-> PUBLISHED / CANDIDATE(取消选择) / ELIMINATED(放弃)
     assert!(AssetStatus::Selected.can_transition_to(&AssetStatus::Published));
     assert!(AssetStatus::Selected.can_transition_to(&AssetStatus::Candidate));
-    // PUBLISHED -> CANDIDATE(纠错)
+    // PUBLISHED -> SELECTED(撤销发布回待发布) / CANDIDATE(纠错)
+    assert!(AssetStatus::Published.can_transition_to(&AssetStatus::Selected));
     assert!(AssetStatus::Published.can_transition_to(&AssetStatus::Candidate));
     // ELIMINATED（淘汰）可恢复
     assert!(AssetStatus::Eliminated.can_transition_to(&AssetStatus::Candidate));
@@ -32,7 +33,7 @@ fn asset_status_allows_documented_transitions() {
 fn asset_status_rejects_illegal_transitions() {
     assert!(!AssetStatus::New.can_transition_to(&AssetStatus::Published));
     assert!(!AssetStatus::New.can_transition_to(&AssetStatus::Candidate));
-    assert!(!AssetStatus::Published.can_transition_to(&AssetStatus::Selected));
+    assert!(!AssetStatus::Published.can_transition_to(&AssetStatus::Analyzing));
     assert!(!AssetStatus::DownloadFailed.can_transition_to(&AssetStatus::Published));
 }
 
