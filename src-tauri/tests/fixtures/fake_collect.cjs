@@ -1,4 +1,5 @@
 // 测试用假采集 sidecar：写 running，写 videos.jsonl（引用 outputDir 下预置的 fakeN.mp4），再写 done。
+// done 时附带 stats（模拟真实 sidecar 的损耗留痕），供 Agent 带进任务结果。
 const fs = require("fs");
 const path = require("path");
 
@@ -7,10 +8,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
   fs.mkdirSync(path.dirname(job.progressFile), { recursive: true });
-  const write = (state, msg) =>
+  const write = (state, msg, stats) =>
     fs.writeFileSync(
       job.progressFile,
-      JSON.stringify({ state, downloaded: 0, target: job.count, message: msg }),
+      JSON.stringify({
+        state,
+        downloaded: 0,
+        target: job.count,
+        message: msg,
+        ...(stats ? { stats } : {}),
+      }),
     );
   write("running", "fake collect start");
 
@@ -48,7 +55,12 @@ async function main() {
     },
   ].slice(0, job.count);
   fs.writeFileSync(job.videosFile, records.map((r) => JSON.stringify(r)).join("\n"));
-  write("done", "fake collect done");
+  write("done", "fake collect done", {
+    feed_entries: records.length + 1,
+    candidates: records.length,
+    filtered_likes: 1,
+    downloaded: records.length,
+  });
 }
 
 main();

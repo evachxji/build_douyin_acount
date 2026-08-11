@@ -24,6 +24,22 @@ const OPENCLI_ENTRIES = [
 
 const session = `collect-${job.platform}-${job.taskId ?? "x"}`;
 
+// 损耗留痕：stats 计数随每次 writeProgress 合入 progress.json（任务完成时由 Agent 带进结果，
+// 任务面板可一眼看出损耗在哪段）；skipped.jsonl 逐条记录跳过明细（stage/reason/id/url），
+// 任务运行期间可在 collect 目录查看，Done 后随临时目录清理。
+const stats = { downloaded: 0 };
+
+function bump(key, n = 1) {
+  stats[key] = (stats[key] ?? 0) + n;
+}
+
+function recordSkip(entry) {
+  if (!job.skippedFile) return;
+  try {
+    fs.appendFileSync(job.skippedFile, JSON.stringify(entry) + "\n");
+  } catch {}
+}
+
 function writeProgress(patch) {
   const base = { state: "running", downloaded: 0, target: job.count, message: "" };
   const prev = fs.existsSync(job.progressFile)
@@ -31,7 +47,7 @@ function writeProgress(patch) {
     : base;
   fs.writeFileSync(
     job.progressFile,
-    JSON.stringify({ ...prev, ...patch }, null, 2),
+    JSON.stringify({ ...prev, ...patch, stats: { ...stats } }, null, 2),
   );
   console.log(`[collector] ${patch.state ?? "running"} ${patch.message ?? ""}`);
 }
@@ -193,6 +209,7 @@ function buildReelInfoScript(shortcode) {
 
 function recordVideo(v) {
   fs.appendFileSync(job.videosFile, JSON.stringify(v) + "\n");
+  stats.downloaded = v.index;
   writeProgress({
     downloaded: v.index,
     message: `已下载 ${v.index}/${job.count}: ${v.title || v.url}`,
@@ -203,12 +220,19 @@ async function collectTiktok() {
   // 拉取 3 倍候选量，过滤后仍能凑够 count。
   const limit = Math.min(120, job.count * 3);
   const entries = await runOpencli(["tiktok", "explore", "--limit", String(limit), "-f", "json"]);
+  bump("feed_entries", (entries ?? []).length);
   const seen = new Set();
   const candidates = (entries ?? []).filter((e) => {
     if (seen.has(e.id) || !e.url) return false;
     seen.add(e.id);
-    return e.likes <= job.maxLikes;
+    if (e.likes > job.maxLikes) {
+      bump("filtered_likes");
+      recordSkip({ stage: "filter", reason: "likes-over-limit", id: e.id, url: e.url, likes: e.likes });
+      return false;
+    }
+    return true;
   });
+  stats.candidates = candidates.length;
 
   let index = 0;
   for (const e of candidates) {
@@ -223,6 +247,14 @@ async function collectTiktok() {
       file = await ytdlpDownload(e.url, outBase);
     } catch (err) {
       // 单条下载失败只跳过，不中断整轮采集。
+      bump("download_failed");
+      recordSkip({
+        stage: "download",
+        reason: "download-failed",
+        id: e.id,
+        url: e.url,
+        detail: String(err?.message || err).slice(0, 300),
+      });
       writeProgress({ message: `下载失败跳过: ${e.url}` });
       continue;
     }
@@ -248,7 +280,10 @@ async function collectInstagram() {
   const candidates = new Map(); // shortcode -> { id, url, videoUrl, likeCount, title, author }
   const need = job.count * 2;
   await runOpencli(["browser", session, "open", "https://www.instagram.com/reels/"]);
+  let prevUrl = "";
+  let rounds = 0;
   for (let i = 0; i < 120 && candidates.size < need; i += 1) {
+    rounds += 1;
     if (markerExists(job.cancelFile)) {
       writeProgress({ state: "cancelled", message: "用户取消" });
       process.exit(2);
@@ -262,13 +297,20 @@ async function collectInstagram() {
     }
     const clean = String(url).replace(/[?#].*$/, "");
     const m = /\/reels\/([A-Za-z0-9_-]+)\/?$/.exec(clean);
-    if (m && !candidates.has(m[1])) {
+    if (clean === prevUrl) {
+      bump("stale_rounds"); // URL 未变化：按键未生效或页面未加载完
+    } else if (m && candidates.has(m[1])) {
+      bump("dup_rounds"); // 切到了已收集过的 reel：推荐流重复
+    } else if (m) {
       candidates.set(m[1], { id: m[1], url: `https://www.instagram.com/reels/${m[1]}/` });
     }
+    prevUrl = clean;
     writeProgress({ message: `刷流收集候选 ${candidates.size}/${need}` });
     await runOpencliRaw(["browser", session, "keys", "ArrowDown"]).catch(() => {});
     await new Promise((r) => setTimeout(r, 2600));
   }
+  stats.rounds = rounds;
+  stats.candidates = candidates.size;
 
   // 阶段2：逐条打开单 reels 页，页面内 info API 拿 CDN 直链与元数据。
   let resolveIndex = 0;
@@ -299,6 +341,16 @@ async function collectInstagram() {
     cand.likeCount = info?.likeCount ?? null;
     cand.title = info?.title || "";
     cand.author = info?.author || "";
+    if (!info?.ok) {
+      bump("resolve_failed");
+      recordSkip({
+        stage: "resolve",
+        reason: info?.reason ?? "eval-error",
+        status: info?.status,
+        id: cand.id,
+        url: cand.url,
+      });
+    }
   }
   await runOpencli(["browser", session, "close"]).catch(() => {});
 
@@ -312,16 +364,35 @@ async function collectInstagram() {
     }
     if (index >= job.count) break;
     if (!cand.videoUrl) {
+      // 无直链 = 阶段②解析失败，已计入 resolve_failed，不重复计数。
       writeProgress({ message: `跳过（无直链）: ${cand.url}` });
       continue;
     }
-    if (cand.likeCount != null && cand.likeCount > job.maxLikes) continue;
+    if (cand.likeCount != null && cand.likeCount > job.maxLikes) {
+      bump("filtered_likes");
+      recordSkip({
+        stage: "filter",
+        reason: "likes-over-limit",
+        id: cand.id,
+        url: cand.url,
+        likes: cand.likeCount,
+      });
+      continue;
+    }
     const outBase = path.join(job.outputDir, `ig_${cand.id}`);
     let file;
     try {
       file = await ytdlpDownloadDirect(cand.videoUrl, outBase);
     } catch (e) {
       // 单条 CDN 直链下载失败（过期/403/限流常见）只跳过，不中断整轮采集。
+      bump("download_failed");
+      recordSkip({
+        stage: "download",
+        reason: "download-failed",
+        id: cand.id,
+        url: cand.url,
+        detail: String(e?.message || e).slice(0, 300),
+      });
       writeProgress({ message: `下载失败跳过: ${cand.url}` });
       continue;
     }

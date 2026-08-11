@@ -67,9 +67,20 @@ function TaskResult({ task, asset }: { task: AgentTask; asset?: VideoAsset }) {
       | null
       | undefined;
     const imported = Number(payload.imported ?? 0);
+    const target = Number(payload.count ?? 0);
+    // 损耗留痕（sidecar stats）：一眼看出没采满时损耗在哪段。
+    const stats = payload.stats as Record<string, number> | null | undefined;
+    const loss: string[] = [];
+    if (stats) {
+      if (typeof stats.candidates === "number") loss.push(`候选${stats.candidates}`);
+      if (stats.resolve_failed) loss.push(`解析✗${stats.resolve_failed}`);
+      if (stats.filtered_likes) loss.push(`超赞✗${stats.filtered_likes}`);
+      if (stats.download_failed) loss.push(`下载✗${stats.download_failed}`);
+    }
     const text = [
-      `已采集 ${imported} 条`,
+      target > 0 ? `已采集 ${imported}/${target} 条` : `已采集 ${imported} 条`,
       payload.platform ? `（${platformLabel(String(payload.platform))}）` : null,
+      loss.length ? ` · ${loss.join(" · ")}` : null,
       first?.title ? ` · ${first.title}` : null,
       first?.author ? ` · ${first.author}` : null,
       first?.likes != null ? ` · ♥${formatCount(first.likes)}` : null,
