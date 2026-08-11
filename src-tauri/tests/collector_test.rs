@@ -169,6 +169,35 @@ fn collector_imported_is_task_total_not_final_round() {
 }
 
 #[test]
+fn collector_done_result_includes_sidecar_stats() {
+    // 损耗留痕：sidecar 在 progress.json 维护的 stats（候选/过滤/下载失败等计数）
+    // 必须在 Done 时随任务结果带出（临时目录随后被清理），任务面板据此展示损耗分布。
+    let env = setup(2);
+    preplace_fake_videos(&env);
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let mut outcome = None;
+    for _ in 0..20 {
+        let task = claim(&env);
+        outcome = Some(env.agent.run(&ctx, task).expect("run"));
+        if !matches!(outcome.as_ref().unwrap(), AgentOutcome::Continue) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    match outcome.expect("ran") {
+        AgentOutcome::Succeeded(v) => {
+            assert_eq!(v["stats"]["candidates"], 2);
+            assert_eq!(v["stats"]["filtered_likes"], 1);
+            assert_eq!(v["stats"]["downloaded"], 2);
+        }
+        other => panic!("expected Succeeded, got {other:?}"),
+    }
+}
+
+#[test]
 fn collector_surfaces_failure() {
     let env = setup(1);
     let dir = env
@@ -189,6 +218,83 @@ fn collector_surfaces_failure() {
     let task = claim(&env);
     let err = env.agent.run(&ctx, task).expect_err("must fail");
     assert!(err.to_string().contains("boom"), "{err}");
+}
+
+#[test]
+fn collector_zero_import_with_download_failures_is_failure_not_success() {
+    // 回归（2026-08-11 TikTok 反爬挑战变更致 yt-dlp 全挂）：sidecar 正常跑完
+    // state=done 但 26/26 全部下载失败，任务却被标 SUCCEEDED(imported:0)，
+    // UI 完全看不出故障。整轮 0 导入且有下载失败时必须 FAILED 浮出水面。
+    let env = setup(1);
+    let dir = env
+        .store
+        .root()
+        .join("collect")
+        .join(env.task_id.to_string());
+    std::fs::create_dir_all(&dir).expect("dir");
+    std::fs::write(
+        dir.join("progress.json"),
+        serde_json::to_string(&json!({
+            "state": "done", "downloaded": 0, "target": 1,
+            "message": "下载失败跳过: https://www.tiktok.com/@x/video/1",
+            "stats": { "candidates": 1, "downloaded": 0, "download_failed": 1 }
+        }))
+        .unwrap(),
+    )
+    .expect("progress");
+    std::fs::write(
+        dir.join("skipped.jsonl"),
+        "{\"stage\":\"download\",\"reason\":\"download-failed\",\"id\":\"1\",\"url\":\"https://www.tiktok.com/@x/video/1\",\"detail\":\"ERROR: [TikTok] 1: Unexpected response from webpage request\"}\n",
+    )
+    .expect("skipped");
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let err = env.agent.run(&ctx, task).expect_err("zero-import round must fail");
+    let msg = err.to_string();
+    assert!(msg.contains("全部下载失败"), "{msg}");
+    // yt-dlp 的真实报错须随失败留痕（skipped.jsonl 随后就被清理了）。
+    assert!(
+        msg.contains("Unexpected response from webpage request"),
+        "{msg}"
+    );
+    // 可重试：临时目录已清空，下轮经 Missing 重拉 sidecar。
+    assert!(!dir.join("progress.json").exists(), "失败后应清空临时目录");
+}
+
+#[test]
+fn collector_zero_import_without_download_failures_stays_success() {
+    // 反向守护：候选全被点赞过滤/没刷到候选（download_failed=0）不是故障，
+    // 0 导入仍算成功，避免误报。
+    let env = setup(1);
+    let dir = env
+        .store
+        .root()
+        .join("collect")
+        .join(env.task_id.to_string());
+    std::fs::create_dir_all(&dir).expect("dir");
+    std::fs::write(
+        dir.join("progress.json"),
+        serde_json::to_string(&json!({
+            "state": "done", "downloaded": 0, "target": 1,
+            "message": "done",
+            "stats": { "feed_entries": 3, "candidates": 0, "filtered_likes": 3, "downloaded": 0 }
+        }))
+        .unwrap(),
+    )
+    .expect("progress");
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    match outcome {
+        AgentOutcome::Succeeded(v) => assert_eq!(v["imported"], 0),
+        other => panic!("expected Succeeded, got {other:?}"),
+    }
 }
 
 #[test]

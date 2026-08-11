@@ -75,6 +75,10 @@ fn imported_path(store: &MediaStore, task_id: i64) -> PathBuf {
     collect_dir(store, task_id).join("imported.jsonl")
 }
 
+fn skipped_path(store: &MediaStore, task_id: i64) -> PathBuf {
+    collect_dir(store, task_id).join("skipped.jsonl")
+}
+
 fn output_dir(store: &MediaStore, task_id: i64) -> PathBuf {
     collect_dir(store, task_id).join("output")
 }
@@ -111,6 +115,7 @@ fn spawn_sidecar(
         "progressFile": progress_path(&ctx.store, task.id),
         "videosFile": videos_path(&ctx.store, task.id),
         "cancelFile": cancel_path(&ctx.store, task.id),
+        "skippedFile": skipped_path(&ctx.store, task.id),
         "cookiesFile": ctx.store.root().join("cookies.txt"),
         "ytdlpPath": self_agent.ytdlp,
     });
@@ -168,6 +173,32 @@ fn append_line(path: &Path, line: &str) -> Result<(), DomainError> {
         .open(path)?;
     writeln!(f, "{line}")?;
     Ok(())
+}
+
+/// 取 skipped.jsonl 里最后一条下载失败的报错摘要（须在清理临时目录前调用），
+/// 让 yt-dlp 的真实报错随任务失败留痕，否则目录清理后无从排查。
+fn last_download_error(path: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    raw.lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .rfind(|v| v["reason"].as_str() == Some("download-failed"))
+        .and_then(|v| v["detail"].as_str().map(str::to_string))
+        .map(|d| d.chars().take(150).collect())
+}
+
+/// 采集失败统一出口：可重试时清空临时目录（下轮经 Missing 重拉 sidecar），
+/// 按剩余尝试次数区分消息。
+fn fail_task(store: &MediaStore, task: &AgentTask, msg: String) -> DomainError {
+    if task.attempts < task.max_attempts {
+        let dir = collect_dir(store, task.id);
+        if dir.is_dir() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        DomainError::InvalidData(format!("采集失败，将自动重试：{msg}"))
+    } else {
+        DomainError::InvalidData(format!("采集失败：{msg}"))
+    }
 }
 
 /// 增量导入 sidecar 已下载的视频（videos.jsonl 中尚未导入的行），
@@ -287,6 +318,29 @@ impl Agent for CollectorAgent {
                 // 行数为准（本任务全部已处理视频），而非 Done 这一轮新导入的数量。
                 let ip = imported_path(&ctx.store, task.id);
                 let imported_count = load_imported(&ip)?.len();
+                // 损耗留痕：sidecar 在 progress.json 里维护 stats（候选/过滤/解析失败/下载失败），
+                // 清理临时目录前读出并随结果入库，任务面板据此展示损耗分布。
+                let stats = std::fs::read_to_string(&progress_file)
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                    .and_then(|v| v.get("stats").cloned())
+                    .unwrap_or(serde_json::Value::Null);
+                // 整轮 0 导入且确有下载失败（典型：yt-dlp 提取器被平台变更打挂）——
+                // 不能报成功，按失败处理走退避重试，让故障在任务面板浮出水面。
+                let download_failed = stats
+                    .get("download_failed")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                if imported_count == 0 && download_failed > 0 {
+                    let detail = last_download_error(&skipped_path(&ctx.store, task.id))
+                        .map(|d| format!("；末条报错: {d}"))
+                        .unwrap_or_default();
+                    return Err(fail_task(
+                        &ctx.store,
+                        &task,
+                        format!("{download_failed} 条视频全部下载失败，导入 0 条{detail}"),
+                    ));
+                }
                 // 首条展示：取本任务第一条已处理视频（imported.jsonl 首行 dedup -> 素材）。
                 let first_asset = first_imported_line(&ip)
                     .and_then(|dedup| AssetsRepo::new(ctx.db).find_by_dedup(&dedup).ok().flatten())
@@ -307,6 +361,7 @@ impl Agent for CollectorAgent {
                     "imported": imported_count,
                     "enqueued_analysis": enqueued.len(),
                     "first_asset": first_asset,
+                    "stats": stats,
                 })))
             }
             CollectorState::Cancelled => Ok(AgentOutcome::Cancelled(json!({
@@ -316,15 +371,7 @@ impl Agent for CollectorAgent {
                 // 不在此处重拉 sidecar：清空临时目录后返回 Err 消耗一次尝试，
                 // 由 runtime 退避后重新认领、经 Missing 分支重拉——
                 // 保证同一时刻只有一个采集 sidecar（TT/IG 共享浏览器，并发互相抢占）。
-                if task.attempts < task.max_attempts {
-                    let dir = collect_dir(&ctx.store, task.id);
-                    if dir.is_dir() {
-                        let _ = std::fs::remove_dir_all(&dir);
-                    }
-                    Err(DomainError::InvalidData(format!("采集失败，将自动重试：{msg}")))
-                } else {
-                    Err(DomainError::InvalidData(format!("采集失败：{msg}")))
-                }
+                Err(fail_task(&ctx.store, &task, msg))
             }
             CollectorState::Missing => unreachable!(),
         }
