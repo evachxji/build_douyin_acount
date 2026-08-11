@@ -126,6 +126,12 @@ function runOpencliRaw(args) {
   });
 }
 
+// TikTok 反爬挑战 workaround（yt-dlp issue #17403，2026-08-11 起全量失败
+// "Unexpected response from webpage request"）：yt-dlp 默认 UA 的 Chrome 版本
+// 过旧被挑战页拒绝，换成近期 Chrome UA 即可通过；上游修复后可移除。
+const TIKTOK_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
 async function ytdlpDownload(url, outBase) {
   const args = [
     "--no-playlist",
@@ -135,6 +141,8 @@ async function ytdlpDownload(url, outBase) {
     "30",
     "--retries",
     "4",
+    "--user-agent",
+    TIKTOK_UA,
   ];
   if (job.cookiesFile && fs.existsSync(job.cookiesFile)) {
     args.push("--cookies", job.cookiesFile);
