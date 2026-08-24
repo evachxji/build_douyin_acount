@@ -19,6 +19,7 @@ const EMPTY: AppSettings = {
   publisher_browser: "chrome",
   collector_script: "",
   ytdlp_path: "yt-dlp",
+  douyin_sync_script: "scripts/douyin-sync/sync.js",
   account_style: "治愈",
   batch_size: 20,
   tiktok_ratio: 0.3,

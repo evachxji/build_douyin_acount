@@ -1,10 +1,13 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use chrono::{Local, NaiveDate, NaiveDateTime, Timelike};
 use serde_json::json;
 
 use crate::agents::{Agent, AgentContext, AgentOutcome};
 use crate::db::repos::assets::AssetsRepo;
+use crate::db::repos::douyin_posts::DouyinPostsRepo;
 use crate::db::repos::drafts::DraftsRepo;
 use crate::db::repos::tasks::TasksRepo;
 use crate::domain::asset::AssetStatus;
@@ -141,6 +144,41 @@ pub fn request_confirm(store: &crate::media::MediaStore, draft_id: i64) -> Resul
     write_marker(store, "confirm", draft_id)
 }
 
+/// 定时发布目标时刻（本地时间）：今天起 14 天内、最近一个「没有公开视频」的日子
+/// （发布日历口径，私密作品不占位），时刻取当天 08:00~19:00 间随机分钟，且满足抖音
+/// 「2 小时后及 14 天内」限制——今天窗口（now+2h 向上取整 ~ 19:00）不足则跳过今天。
+/// 14 天均无空档时返回 None，由 sidecar 提示人工选择。
+pub fn pick_schedule_time(
+    occupied: &HashSet<NaiveDate>,
+    now: NaiveDateTime,
+    rand_nanos: u32,
+) -> Option<NaiveDateTime> {
+    const OPEN_MIN: i64 = 8 * 60; // 08:00
+    const CLOSE_MIN: i64 = 19 * 60; // 19:00（不含）
+    let today = now.date();
+    for offset in 0..14 {
+        let day = today + chrono::Duration::days(offset);
+        if occupied.contains(&day) {
+            continue;
+        }
+        let mut start_min = OPEN_MIN;
+        if offset == 0 {
+            let earliest = now + chrono::Duration::hours(2);
+            let ceil_min = earliest.num_seconds_from_midnight().div_ceil(60);
+            start_min = start_min.max(i64::from(ceil_min));
+        }
+        if start_min >= CLOSE_MIN {
+            continue;
+        }
+        let span = (CLOSE_MIN - start_min) as u32;
+        let minute = start_min + i64::from(rand_nanos % span);
+        return day
+            .and_hms_opt(0, 0, 0)
+            .map(|base| base + chrono::Duration::minutes(minute));
+    }
+    None
+}
+
 fn spawn_sidecar(
     ctx: &AgentContext,
     draft_id: i64,
@@ -152,12 +190,18 @@ fn spawn_sidecar(
     let jobs = base.join("jobs");
     std::fs::create_dir_all(&jobs)?;
     let job_path = jobs.join(format!("{draft_id}.json"));
+    // 定时发布：按日历空档日 + 08:00~19:00 随机分钟计算目标时刻（None = 14 天无空档，
+    // sidecar 会提示人工选择）。
+    let occupied = DouyinPostsRepo::new(ctx.db).list_occupied_days()?;
+    let now = Local::now();
+    let schedule_time = pick_schedule_time(&occupied, now.naive_local(), now.timestamp_subsec_nanos());
     let job = json!({
         "draftId": draft_id,
         "videoPath": asset.file_path,
         "title": draft.title,
         "body": draft.body,
         "hashtags": draft.hashtags,
+        "scheduleTime": schedule_time.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
         "progressFile": progress_path(&ctx.store, draft_id),
         "cancelFile": cancel_path(&ctx.store, draft_id),
         "confirmFile": confirm_path(&ctx.store, draft_id),

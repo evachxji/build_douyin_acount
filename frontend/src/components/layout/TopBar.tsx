@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useRef, useState } from "react";
 import { api } from "../../api/client";
 import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { OllamaStatusTag } from "./OllamaStatusTag";
+import { CalendarPopover } from "../calendar/CalendarPopover";
 
 export function TopBar({
   onOpenSettings,
@@ -13,7 +13,6 @@ export function TopBar({
 }) {
   const filter = useAssetsStore((s) => s.filter);
   const setFilter = useAssetsStore((s) => s.setFilter);
-  const importFiles = useAssetsStore((s) => s.importFiles);
   const analyzeSelected = useAssetsStore((s) => s.analyzeSelected);
   const reload = useAssetsStore((s) => s.load);
   const ids = useSelectionStore((s) => s.ids);
@@ -24,17 +23,8 @@ export function TopBar({
     s.tasks.filter((t) => t.status === "WAITING_FOR_HUMAN").length,
   );
   const [analyzing, setAnalyzing] = useState(false);
-
-  const handleImport = async () => {
-    const picked = await open({
-      multiple: true,
-      title: "选择要导入的视频",
-      filters: [{ name: "视频", extensions: ["mp4", "mov", "mkv", "webm"] }],
-    });
-    if (!picked) return;
-    const paths = typeof picked === "string" ? [picked] : picked;
-    await importFiles(paths);
-  };
+  const [calOpen, setCalOpen] = useState(false);
+  const calBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const handleCollect = async () => {
     try {
@@ -88,6 +78,22 @@ export function TopBar({
         <option value="local">本地</option>
       </select>
 
+      <button
+        ref={calBtnRef}
+        onClick={() => setCalOpen((v) => !v)}
+        className={`h-9 rounded border px-3 text-sm transition-colors ${
+          calOpen
+            ? "border-accent bg-accent/15 text-accent"
+            : "border-line text-mute hover:border-accent/40 hover:text-paper"
+        }`}
+        title="发布日历：查看已发布/定时作品与数据"
+      >
+        📅
+      </button>
+      {calOpen && (
+        <CalendarPopover anchorRef={calBtnRef} onClose={() => setCalOpen(false)} />
+      )}
+
       <div className="flex-1" />
 
       <button
@@ -98,12 +104,6 @@ export function TopBar({
         ⟳
       </button>
       <OllamaStatusTag />
-      <button
-        onClick={() => void handleImport()}
-        className="h-9 rounded border border-line px-3 text-sm text-paper hover:border-accent/50 hover:bg-accent/10"
-      >
-        导入视频
-      </button>
       <button
         onClick={() => void handleCollect()}
         className="h-9 rounded border border-accent bg-accent/10 px-3 text-sm text-accent hover:bg-accent/20"
@@ -133,6 +133,17 @@ export function TopBar({
             {waitingCount}
           </span>
         )}
+      </button>
+      <button
+        onClick={() =>
+          void api
+            .openUrl("https://creator.douyin.com/creator-micro/content/manage")
+            .catch((e) => alert(String(e)))
+        }
+        className="h-9 rounded border border-line px-3 text-sm text-mute hover:border-accent/40 hover:text-paper"
+        title="打开抖音创作者中心"
+      >
+        🏠
       </button>
       <button
         onClick={onOpenSettings}

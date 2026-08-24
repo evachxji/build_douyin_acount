@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanConditions, formatCount, formatDuration, statusMeta } from "./format";
+import { cleanConditions, formatCount, formatDateTime, formatDuration, formatSyncAgo, statusMeta } from "./format";
 
 describe("formatDuration", () => {
   it("formats seconds as mm:ss", () => {
@@ -31,5 +31,42 @@ describe("statusMeta", () => {
 describe("cleanConditions", () => {
   it("trims whitespace and drops empty rows", () => {
     expect(cleanConditions([" 宠物 ", "", "  ", "风景"])).toEqual(["宠物", "风景"]);
+  });
+});
+
+/** 造 SQLite UTC 时间串（与库写入格式一致：无 T 无 Z）。 */
+const sqliteUtcAgo = (msAgo: number) =>
+  new Date(Date.now() - msAgo).toISOString().replace("T", " ").slice(0, 19);
+
+describe("formatSyncAgo", () => {
+  it("shows 刚刚 within one minute", () => {
+    expect(formatSyncAgo(sqliteUtcAgo(30_000))).toBe("刚刚");
+    expect(formatSyncAgo(sqliteUtcAgo(0))).toBe("刚刚");
+  });
+
+  it("shows minutes within one hour", () => {
+    expect(formatSyncAgo(sqliteUtcAgo(5 * 60_000))).toBe("5分钟前");
+    expect(formatSyncAgo(sqliteUtcAgo(59 * 60_000))).toBe("59分钟前");
+  });
+
+  it("shows hours within one day, without minutes", () => {
+    expect(formatSyncAgo(sqliteUtcAgo(3 * 3_600_000 + 40 * 60_000))).toBe("3小时前");
+    expect(formatSyncAgo(sqliteUtcAgo(23 * 3_600_000))).toBe("23小时前");
+  });
+
+  it("falls back to absolute date-time beyond one day", () => {
+    const v = sqliteUtcAgo(25 * 3_600_000);
+    expect(formatSyncAgo(v)).toBe(formatDateTime(v));
+  });
+
+  it("treats future timestamps as 刚刚 (clock skew)", () => {
+    expect(formatSyncAgo(sqliteUtcAgo(-10 * 60_000))).toBe("刚刚");
+    const farFuture = new Date(Date.now() + 3_600_000).toISOString();
+    expect(formatSyncAgo(farFuture)).toBe("刚刚");
+  });
+
+  it("shows placeholder for empty input", () => {
+    expect(formatSyncAgo(null)).toBe("—");
+    expect(formatSyncAgo(undefined)).toBe("—");
   });
 });

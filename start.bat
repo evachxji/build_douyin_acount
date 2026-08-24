@@ -1,0 +1,2 @@
+pnpm tauri dev
+pause

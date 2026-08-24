@@ -164,7 +164,7 @@ export function Waterfall({ width }: { width: number }) {
           </div>
         ) : assets.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-mute">
-            暂无素材，点击右上角「导入」添加本地视频
+            暂无素材，点击右上角「开始采集」刷推荐流获取视频
           </div>
         ) : (
           <div

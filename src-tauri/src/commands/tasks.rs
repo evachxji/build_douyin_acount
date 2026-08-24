@@ -50,6 +50,14 @@ pub fn cancel_task(state: State<AppState>, id: i64) -> Result<(), ApiError> {
             crate::agents::collector::request_cancel(&state.store, t.id)
                 .map_err(ApiError::from)?;
         }
+        if t.agent_name == "douyin_sync" {
+            crate::agents::douyin_sync::request_cancel(&state.store, t.id)
+                .map_err(ApiError::from)?;
+        }
+        if t.agent_name == "douyin_moderate" {
+            crate::agents::douyin_moderate::request_cancel(&state.store, t.id)
+                .map_err(ApiError::from)?;
+        }
     }
     Ok(())
 }

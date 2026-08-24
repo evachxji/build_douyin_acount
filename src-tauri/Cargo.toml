@@ -33,7 +33,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 arboard = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }

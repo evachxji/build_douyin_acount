@@ -1,7 +1,9 @@
 pub mod analysis;
 pub mod assets;
+pub mod backup;
 pub mod collection;
 pub mod content;
+pub mod douyin;
 pub mod ollama;
 pub mod publish;
 pub mod settings;

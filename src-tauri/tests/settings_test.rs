@@ -47,6 +47,7 @@ fn settings_roundtrip_persists_fields() {
         publisher_browser: "chromium".to_string(),
         collector_script: "scripts/dev-collect.js".to_string(),
         ytdlp_path: "yt-dlp-dev".to_string(),
+        douyin_sync_script: "scripts/dev-sync.js".to_string(),
         account_style: "搞笑".to_string(),
         batch_size: 30,
         tiktok_ratio: 0.4,
@@ -75,4 +76,8 @@ fn settings_load_legacy_json_without_conditions_keeps_defaults() {
     assert!(loaded.hit_conditions.is_empty(), "missing field defaults to empty");
     assert!(loaded.exclude_conditions.is_empty(), "missing field defaults to empty");
     assert!(loaded.condition_basis.is_empty(), "missing field defaults to empty");
+    assert_eq!(
+        loaded.douyin_sync_script, "scripts/douyin-sync/sync.js",
+        "missing douyin_sync_script falls back to default instead of resetting all settings"
+    );
 }

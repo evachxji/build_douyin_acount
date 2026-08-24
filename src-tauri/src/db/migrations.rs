@@ -116,6 +116,32 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 抖音创作者中心同步回来的作品快照（发布日历数据源）。
+-- 时间用 epoch 秒（源数据即 epoch）；率类指标列表 API 不返回时留 NULL，UI 显示 —。
+CREATE TABLE IF NOT EXISTS douyin_posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  aweme_id TEXT NOT NULL UNIQUE,
+  title TEXT,
+  cover_path TEXT,
+  cover_url TEXT,
+  status TEXT NOT NULL DEFAULT 'published',
+  play_count INTEGER NOT NULL DEFAULT 0,
+  digg_count INTEGER NOT NULL DEFAULT 0,
+  comment_count INTEGER NOT NULL DEFAULT 0,
+  share_count INTEGER NOT NULL DEFAULT 0,
+  completion_rate REAL,
+  bounce_rate_2s REAL,
+  violation_status INTEGER,
+  violation_text TEXT,
+  violation_brief TEXT,
+  violation_url TEXT,
+  create_time INTEGER NOT NULL DEFAULT 0,
+  public_time INTEGER NOT NULL DEFAULT 0,
+  synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_douyin_posts_public_time ON douyin_posts(public_time);
+
 -- 状态模型重构（第五阶段）：READY -> CANDIDATE；SKIPPED/LOW_PRIORITY -> ELIMINATED
 UPDATE video_assets SET status = 'CANDIDATE' WHERE status = 'READY';
 UPDATE video_assets SET status = 'ELIMINATED' WHERE status IN ('SKIPPED', 'LOW_PRIORITY');

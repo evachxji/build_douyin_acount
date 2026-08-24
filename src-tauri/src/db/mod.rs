@@ -25,6 +25,7 @@ impl Database {
         conn.execute_batch(migrations::MIGRATIONS)?;
         ensure_analysis_conditions_column(&conn)?;
         ensure_eliminate_reason_column(&conn)?;
+        ensure_douyin_posts_violation_columns(&conn)?;
         seed_account_styles(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -59,6 +60,25 @@ fn ensure_eliminate_reason_column(conn: &Connection) -> Result<(), DomainError> 
         .collect::<Result<_, _>>()?;
     if !cols.iter().any(|c| c == "eliminate_reason") {
         conn.execute_batch("ALTER TABLE video_assets ADD COLUMN eliminate_reason TEXT")?;
+    }
+    Ok(())
+}
+
+/// 旧库升级：douyin_posts 缺违规信息列时补上（幂等，每次启动安全）。
+fn ensure_douyin_posts_violation_columns(conn: &Connection) -> Result<(), DomainError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(douyin_posts)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    for (name, ddl) in [
+        ("violation_status", "ALTER TABLE douyin_posts ADD COLUMN violation_status INTEGER"),
+        ("violation_text", "ALTER TABLE douyin_posts ADD COLUMN violation_text TEXT"),
+        ("violation_brief", "ALTER TABLE douyin_posts ADD COLUMN violation_brief TEXT"),
+        ("violation_url", "ALTER TABLE douyin_posts ADD COLUMN violation_url TEXT"),
+    ] {
+        if !cols.iter().any(|c| c == name) {
+            conn.execute_batch(ddl)?;
+        }
     }
     Ok(())
 }

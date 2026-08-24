@@ -58,6 +58,8 @@ export function agentLabel(agent: string): string {
     publisher: "抖音发布",
     collector: "素材采集",
     content: "文案生成",
+    douyin_sync: "数据同步",
+    douyin_moderate: "违规处理",
   };
   return map[agent] ?? agent;
 }
@@ -69,6 +71,8 @@ export function taskTypeLabel(type: string): string {
     prepare_publish: "准备发布",
     collect_batch: "批量采集",
     generate_copy: "生成文案",
+    sync_works: "作品同步",
+    moderate_violation: "违规处理",
   };
   return map[type] ?? type;
 }
@@ -82,6 +86,20 @@ export function formatDateTime(v: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return v;
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 同步时间的相对显示：1 分钟内"刚刚"、1 小时内"xx分钟前"、24 小时内"xx小时前"，超出回退 formatDateTime。 */
+export function formatSyncAgo(v: string | null | undefined): string {
+  if (!v) return "—";
+  const iso = v.includes("T") ? v : `${v.replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return v;
+  const minutes = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (minutes < 1) return "刚刚"; // 含未来时间（时钟偏差）
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return formatDateTime(v);
 }
 
 /** 筛选条件列表清洗：去首尾空白、丢弃空行。 */

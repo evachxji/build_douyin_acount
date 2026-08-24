@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { api } from "../api/client";
 import type { AgentTask } from "../api/types";
 import { useAssetsStore } from "./assetsStore";
+import { useDouyinPostsStore } from "./douyinPostsStore";
 
 interface TasksState {
   tasks: AgentTask[];
@@ -34,6 +35,14 @@ export const useTaskStore = create<TasksState>((set, get) => ({
           prev.some((p) => p.id === t.id && !terminal.includes(p.status)),
       );
       if (newlyTerminal) void useAssetsStore.getState().load();
+      // 同步/违规处理任务终态时刷新发布日历数据。
+      const syncTerminal = tasks.some(
+        (t) =>
+          (t.agent_name === "douyin_sync" || t.agent_name === "douyin_moderate") &&
+          terminal.includes(t.status) &&
+          prev.some((p) => p.id === t.id && !terminal.includes(p.status)),
+      );
+      if (syncTerminal) void useDouyinPostsStore.getState().load();
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) });
     }

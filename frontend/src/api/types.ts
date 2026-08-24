@@ -112,6 +112,7 @@ export interface AppSettings {
   publisher_browser: string;
   collector_script: string;
   ytdlp_path: string;
+  douyin_sync_script: string;
   account_style: string;
   batch_size: number;
   tiktok_ratio: number;
@@ -146,6 +147,30 @@ export interface ContentCopy {
   body: string;
   hashtags: string[];
   created_at: string;
+}
+
+/** 抖音创作者中心同步回来的作品快照（发布日历数据源）。 */
+export interface DouyinPost {
+  id: number;
+  aweme_id: string;
+  title: string | null;
+  cover_path: string | null;
+  cover_url: string | null;
+  status: string; // published / scheduled / reviewing / private / prohibited / deleted
+  play_count: number;
+  digg_count: number;
+  comment_count: number;
+  share_count: number;
+  completion_rate: number | null;
+  bounce_rate_2s: number | null;
+  violation_status: number | null; // review.status 原值（流量减少=5）
+  violation_text: string | null; // 审核结果摘要；非空即违规
+  violation_brief: string | null; // 违规原因（如「原创性不足」）
+  violation_url: string | null; // 违规申诉/详情页链接
+  create_time: number; // epoch 秒
+  public_time: number; // epoch 秒；定时发布为未来时间
+  synced_at: string;
+  updated_at: string;
 }
 
 export interface AssetListFilterArg {

@@ -24,6 +24,9 @@ pub struct AppSettings {
     /// 采集 sidecar 与 yt-dlp 路径。
     pub collector_script: String,
     pub ytdlp_path: String,
+    /// 抖音作品数据同步 sidecar（Node 脚本路径）。
+    #[serde(default = "default_douyin_sync_script")]
+    pub douyin_sync_script: String,
     /// 默认账号文案风格（搞笑/治愈/高级感/情绪价值）。
     pub account_style: String,
     /// 采集配额（均可配置）：每轮条数、平台比例、点赞上限。
@@ -57,6 +60,7 @@ impl Default for AppSettings {
             publisher_browser: "chrome".to_string(),
             collector_script: "scripts/collector/collect.js".to_string(),
             ytdlp_path: "yt-dlp".to_string(),
+            douyin_sync_script: default_douyin_sync_script(),
             account_style: "治愈".to_string(),
             batch_size: 20,
             tiktok_ratio: 0.3,
@@ -67,6 +71,10 @@ impl Default for AppSettings {
             condition_basis: HashMap::new(),
         }
     }
+}
+
+fn default_douyin_sync_script() -> String {
+    "scripts/douyin-sync/sync.js".to_string()
 }
 
 /// app_settings 表访问层：整个设置序列化为 JSON 存在 `app` 键下。

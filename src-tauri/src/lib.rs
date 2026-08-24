@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod agents;
+pub mod backup;
 pub mod commands;
 pub mod db;
 pub mod domain;
@@ -33,6 +34,12 @@ fn storage_root() -> PathBuf {
             }
         }
     }
+    // 安装版：exe 位于 Program Files，普通用户无写权限，落到用户本地数据目录。
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        if !local.is_empty() {
+            return PathBuf::from(local).join("build_douyin_acount").join("storage");
+        }
+    }
     std::env::current_exe()
         .map(|p| {
             p.parent()
@@ -55,6 +62,11 @@ fn app_info() -> serde_json::Value {
 pub fn run() {
     let store = MediaStore::new(storage_root());
     store.ensure_dirs().expect("create storage dirs");
+    // 覆盖式导入的第二段：重启后、打开数据库之前应用暂存内容（此时无文件句柄，替换安全）；
+    // 失败已回滚到原数据，记错误日志后继续用现有数据启动。
+    if let Err(e) = backup::apply_pending_import(&store) {
+        tracing::error!("apply pending import failed: {e}");
+    }
     let db = Database::open(&store.db_dir().join("app.db")).expect("open database");
     let settings = SettingsRepo::new(&db).load().expect("load settings");
     let state = AppState::new(db, store, settings);
@@ -69,11 +81,19 @@ pub fn run() {
             commands::assets::get_analysis,
             commands::assets::delete_asset,
             commands::assets::update_asset_status,
-            commands::assets::import_videos,
             commands::assets::reveal_in_folder,
             commands::assets::library_overview,
             commands::analysis::analyze_assets,
+            commands::backup::export_backup,
+            commands::backup::import_backup,
+            commands::backup::confirm_import,
+            commands::backup::restart_app,
             commands::collection::start_collection,
+            commands::douyin::start_douyin_sync,
+            commands::douyin::list_douyin_posts,
+            commands::douyin::moderate_douyin_violation,
+            commands::douyin::moderate_all_violations,
+            commands::douyin::open_url,
             commands::content::generate_copy,
             commands::content::get_copy,
             commands::content::get_recommendations,
@@ -102,7 +122,7 @@ pub fn run() {
                     }
                 }
             });
-            // 后台 worker：publisher / collector / content 任务（独立线程，避免阻塞 vision 队列）。
+            // 后台 worker：publisher / collector / douyin_sync / content 任务（独立线程，避免阻塞 vision 队列）。
             let handle_pub = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -113,6 +133,12 @@ pub fn run() {
                     }
                     if let Err(e) = runtime.run_once("collector") {
                         tracing::warn!("collector worker error: {e}");
+                    }
+                    if let Err(e) = runtime.run_once("douyin_sync") {
+                        tracing::warn!("douyin_sync worker error: {e}");
+                    }
+                    if let Err(e) = runtime.run_once("douyin_moderate") {
+                        tracing::warn!("douyin_moderate worker error: {e}");
                     }
                     if let Err(e) = runtime.run_once("content") {
                         tracing::warn!("content worker error: {e}");

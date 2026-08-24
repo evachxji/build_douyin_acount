@@ -13,6 +13,8 @@
 //
 // 用法：node publish.js <job.json>
 // job.json 字段：draftId / videoPath / title / body / hashtags[] /
+//                scheduleTime（"YYYY-MM-DD HH:mm" 本地时间或 null——agent 按发布日历
+//                空档日 + 08:00~19:00 随机分钟算好；null 表示 14 天无空档，提示人工）/
 //                progressFile / cancelFile / confirmFile
 
 import { execFile } from "node:child_process";
@@ -28,6 +30,7 @@ const job = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const logDir = path.dirname(job.progressFile);
 fs.mkdirSync(logDir, { recursive: true });
 const session = `dy-pub-${job.draftId}`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // opencli CLI 入口候选（nvm 多版本安装下的探测）。
 const OPENCLI_ENTRIES = [
@@ -464,6 +467,177 @@ async function autoUploadVideo() {
   }
 }
 
+/** AI 封面状态探测（同步瞬时脚本）：返回 JSON 字符串
+ *  {"state":"no-section"|"generating"|"ready","covers":n}。
+ *  就绪判据不只看标题文案（新上传页标题可能始终显示「AI智能推荐封面」），
+ *  而是封面容器内不存在任何「生成中」可见文本且已有带图封面项。 */
+function buildCoverStateScript(cfg) {
+  return `(() => {
+    const K = ${JSON.stringify(cfg)};
+    let title = null;
+    for (const el of document.querySelectorAll("span,div")) {
+      if (el.children.length) continue;
+      if (el.offsetParent === null) continue;
+      if ((el.textContent || "").includes(K.titlePattern)) { title = el; break; }
+    }
+    if (!title) return JSON.stringify({ state: "no-section", covers: 0 });
+    let scope = title;
+    for (let i = 0; i < 6 && scope; i += 1) {
+      if (scope.querySelector && scope.querySelector('[class*="' + K.coverClassKeyword + '"]')) break;
+      scope = scope.parentElement;
+    }
+    const covers = scope
+      ? [...scope.querySelectorAll('[class*="' + K.coverClassKeyword + '"]')].filter(
+          (el) => el.offsetParent !== null && el.querySelector("img"),
+        )
+      : [];
+    let generating = false;
+    for (const el of (scope || document).querySelectorAll("span,div")) {
+      if (el.children.length) continue;
+      if (el.offsetParent === null) continue;
+      if ((el.textContent || "").includes(K.generatingPattern)) { generating = true; break; }
+    }
+    const state = generating || covers.length === 0 ? "generating" : "ready";
+    return JSON.stringify({ state, covers: covers.length });
+  })()`;
+}
+
+/** 封面确认弹窗脚本（异步，≤7s）：点缩略图后会弹「是否确认应用此封面？」，
+ *  在可见弹窗容器内按文本精确点【确定】。返回 'confirmed' / 'no-modal'（未弹窗，
+ *  可能该页面形态直接选中）/ 'no-confirm'。原生 button 派发 click 即可生效。 */
+function buildCoverConfirmScript() {
+  return `(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    let modal = null;
+    for (let i = 0; i < 10; i += 1) {
+      modal = [...document.querySelectorAll('[class*="modal"], [class*="dialog"], [role="dialog"]')]
+        .filter((d) => d.offsetParent !== null)
+        .find((d) => (d.textContent || "").includes("应用此封面"));
+      if (modal) break;
+      await sleep(500);
+    }
+    if (!modal) return "no-modal";
+    const btn = [...modal.querySelectorAll("button")]
+      .filter((b) => b.offsetParent !== null)
+      .find((b) => (b.textContent || "").trim() === "确定");
+    if (!btn) return "no-confirm";
+    btn.click();
+    await sleep(1200);
+    return "confirmed";
+  })()`;
+}
+
+/** AI 封面校验探测（同步瞬时脚本）：返回 JSON 字符串
+ *  {"main":主封面img src, "firstCls":第一个封面项class, "firstSvg":第一项是否含svg选中标记}。 */
+function buildCoverVerifyScript(cfg) {
+  return `(() => {
+    const item = document.querySelector('[class*="${cfg.coverClassKeyword}"]');
+    const mainImg = document.querySelector('[class*="coverControl"] img');
+    return JSON.stringify({
+      main: mainImg ? mainImg.src : "",
+      firstCls: item ? String(item.className) : "",
+      firstSvg: item ? !!item.querySelector("svg") : false,
+    });
+  })()`;
+}
+
+/** 选 AI 推荐封面第 1 张：Node 侧轮询（每次 eval 瞬时返回，绕开 CDP 115s 单次上限），
+ *  等「生成中」结束（AI 封面生成需数十秒，大视频更久，上限 150s）后用 opencli click
+ *  （CDP 真实鼠标输入，先 scrollIntoView）点击第一项，再以主封面变化/选中标记校验。
+ *  校验不过一律返回 false 提示人工——不再把「无法确认」当成功（曾静默失败）。 */
+async function pickAiRecommendCover() {
+  const deadline = Date.now() + 150_000;
+  let noSection = 0;
+  while (Date.now() < deadline) {
+    if (markerExists(job.cancelFile)) throw new CancelRequested();
+    if (!(await sessionAlive())) throw new TabClosed("浏览器标签页已关闭");
+    // eval 返回裸文本（脚本内已 JSON.stringify），用 Raw 变体读取。
+    const raw = await runOpencliRaw([
+      "browser", session, "eval", buildCoverStateScript(SELECTORS.aiCover),
+    ]).catch(() => null);
+    try {
+      const st = JSON.parse(raw || "");
+      if (st.state === "ready" && st.covers > 0) {
+        const verify = buildCoverVerifyScript(SELECTORS.aiCover);
+        const before = JSON.parse(
+          (await runOpencliRaw(["browser", session, "eval", verify]).catch(() => "{}")) || "{}",
+        );
+        const css = `[class*="${SELECTORS.aiCover.coverClassKeyword}"]`;
+        const clicked = await runOpencli(["browser", session, "click", css, "--nth", "0"]).catch(
+          () => null,
+        );
+        if (!clicked?.clicked) return false;
+        // 点击后弹「是否确认应用此封面？」，点【确定】（未弹窗则该页面形态直接选中）。
+        const confirm = await runOpencliRaw([
+          "browser", session, "eval", buildCoverConfirmScript(),
+        ]).catch(() => null);
+        if (confirm !== "confirmed" && confirm !== "no-modal") return false;
+        const after = JSON.parse(
+          (await runOpencliRaw(["browser", session, "eval", verify]).catch(() => "{}")) || "{}",
+        );
+        if (before.main && after.main && before.main !== after.main) return true;
+        if (after.firstSvg && !before.firstSvg) return true;
+        const clsBefore = before.firstCls || "";
+        const clsAfter = after.firstCls || "";
+        if (clsAfter !== clsBefore && /check|select|active/i.test(clsAfter)) return true;
+        return false; // 点击无可见效果：提示人工核对，不盲目报成功
+      }
+      // 封面区与标题框同属基础信息区、理应已渲染；连续探测不到才放弃（防短暂重组）。
+      noSection = st.state === "no-section" ? noSection + 1 : 0;
+      if (noSection >= 5) return false;
+    } catch {
+      /* eval 往返异常，继续轮询 */
+    }
+    await sleep(3000);
+  }
+  return false;
+}
+
+/** 「定时发布」radio 脚本（异步）：按可见文本精确匹配 label；已选中则不动。
+ *  返回 'ready'（点击后已选中）/ 'already'（本已选中）/ 'no-radio' / 'radio-not-checked'。 */
+function buildSchedulePrepScript(cfg) {
+  return `(async () => {
+    const K = ${JSON.stringify(cfg)};
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const labels = [...document.querySelectorAll("label")].filter(
+      (l) => l.offsetParent !== null && (l.textContent || "").replace(/\\s+/g, "") === K.radioLabel,
+    );
+    if (!labels.length) return "no-radio";
+    const label = labels[0];
+    if (label.getAttribute("data-checked") === "true") return "already";
+    label.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    label.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    label.click();
+    await sleep(800);
+    return label.getAttribute("data-checked") === "true" ? "ready" : "radio-not-checked";
+  })()`;
+}
+
+/** 设置定时发布：点 radio -> fill 时间输入框 -> Enter 让 semi DatePicker 解析 ->
+ *  读回校验。返回 'set' 或失败位置（供进度消息提示人工）。 */
+async function applySchedule(timeStr) {
+  // eval 返回裸字符串（非 JSON），用 Raw 变体读取。
+  const prep = await runOpencliRaw([
+    "browser", session, "eval", buildSchedulePrepScript(SELECTORS.schedule),
+  ]).catch(() => null);
+  if (prep !== "ready" && prep !== "already") return prep || "prep-failed";
+  const inputRef = await waitSelector(
+    `input[placeholder='${SELECTORS.schedule.timeInputPlaceholder}']`,
+    15_000,
+  );
+  if (inputRef === null) return "no-input";
+  const fill = await runOpencliFill(["browser", session, "fill", String(inputRef), timeStr]);
+  if (!fill?.filled) return "fill-failed";
+  await runOpencli(["browser", session, "keys", "Enter"]).catch(() => {});
+  await sleep(1000);
+  const check = await runOpencli(["browser", session, "get", "value", String(inputRef)]).catch(
+    () => null,
+  );
+  // 关闭可能残留的日期弹层（不影响已生效值）。
+  await runOpencli(["browser", session, "keys", "Escape"]).catch(() => {});
+  return String(check?.value ?? "") === timeStr ? "set" : "value-mismatch";
+}
+
 async function fillComposer() {
   // 上传/转码完成后作曲器出现标题输入框（placeholder 以「填写作品标题」开头）。
   const titleRef = await waitSelector(SELECTORS.titleInputs[0], 10 * 60 * 1000);
@@ -512,6 +686,14 @@ async function fillComposer() {
     "browser", session, "eval", buildDeclarationScript(SELECTORS.declaration),
   ]).catch(() => null);
   const declState = typeof decl === "string" ? decl : decl?.result ?? decl?.value;
+  // 定时发布（快步骤先做）：agent 已按日历空档算好时间；null 表示 14 天无空档。
+  let schedSet = false;
+  if (job.scheduleTime) {
+    schedSet = (await applySchedule(job.scheduleTime)) === "set";
+  }
+  // AI 智能推荐封面（慢步骤放最后：生成需数十秒，等到就绪再点选第 1 张；
+  // 校验不过不盲目报成功，提示人工核对）。
+  const coverPicked = await pickAiRecommendCover();
   const warns = [];
   if (tagFailed.length) {
     warns.push(`以下话题未能联想选中，仍是纯文本（不生效），请人工点选：${tagFailed.join("、")}`);
@@ -519,9 +701,20 @@ async function fillComposer() {
   if (declState !== "declared") {
     warns.push("自主声明未能自动完成，请人工点选：自主声明 → 内容为转载信息 → 取材站外 → 确定");
   }
+  if (!coverPicked) {
+    warns.push("AI 推荐封面未自动选中，请人工在「设置封面」区点选第 1 张推荐封面");
+  }
+  if (job.scheduleTime && !schedSet) {
+    warns.push("定时发布未自动设置，请人工选择「定时发布」并设置时间");
+  }
+  if (!job.scheduleTime) {
+    warns.push("未来 14 天每天都有作品、无空档日，请人工选择定时发布时间");
+  }
   const declText = declState === "declared" ? "，自主声明已选【内容为转载信息/取材站外】" : "";
+  const coverText = coverPicked ? "，封面已选 AI 推荐第 1 张" : "";
+  const schedText = schedSet ? `，定时发布已设为 ${job.scheduleTime}` : "";
   const warn = warns.length ? `；${warns.join("；")}` : "";
-  writeProgress("form_filled", `标题/文案/话题已填写${declText}，请人工核对后点击页面上的【发布】${warn}`);
+  writeProgress("form_filled", `标题/文案/话题已填写${declText}${coverText}${schedText}，请人工核对后点击页面上的【发布】${warn}`);
 }
 
 async function monitorAfterFill() {

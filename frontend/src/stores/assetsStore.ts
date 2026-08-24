@@ -14,7 +14,6 @@ interface AssetsState {
   removeAsset: (id: number) => Promise<void>;
   removeMany: (ids: number[]) => Promise<void>;
   updateStatus: (id: number, to: string) => Promise<void>;
-  importFiles: (paths: string[]) => Promise<void>;
   analyzeSelected: (ids: number[]) => Promise<number>;
 }
 
@@ -62,11 +61,6 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   updateStatus: async (id, to) => {
     await api.updateAssetStatus(id, to);
-    await get().load();
-  },
-
-  importFiles: async (paths) => {
-    await api.importVideos(paths);
     await get().load();
   },
 

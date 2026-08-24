@@ -39,5 +39,16 @@
     "repost": "内容为转载信息",
     "source": "取材站外",
     "confirm": "确定"
+  },
+  "aiCover": {
+    "_comment": "AI 智能推荐封面：标题按可见文本匹配；封面项类名关键词必须带连字符（recommendCover-）以排除 recommendCoverContainer（子串误匹配曾导致点击落在容器上无效）；就绪判据是容器内无「生成中」可见文本（半成品也有 img，不能只看有无封面项）",
+    "titlePattern": "智能推荐封面",
+    "generatingPattern": "生成中",
+    "coverClassKeyword": "recommendCover-"
+  },
+  "schedule": {
+    "_comment": "发布时间-定时发布：radio 按可见文本精确匹配 label；时间为 semi DatePicker 输入框（fill 后按 Enter 让组件解析）。抖音限制：2 小时后及 14 天内",
+    "radioLabel": "定时发布",
+    "timeInputPlaceholder": "日期和时间"
   }
 }

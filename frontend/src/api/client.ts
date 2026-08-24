@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AssetListFilterArg,
   ContentCopy,
+  DouyinPost,
   LibraryOverview,
   PreparePublishResult,
   PublishDraft,
@@ -51,11 +52,15 @@ export const api = {
   deleteAsset: (id: number) => call<void>("delete_asset", { id }),
   updateAssetStatus: (id: number, to: string) =>
     call<void>("update_asset_status", { id, to }),
-  importVideos: (paths: string[], platform?: string) =>
-    call<VideoAsset[]>("import_videos", { paths, platform: platform ?? null }),
   revealInFolder: (path: string) => call<void>("reveal_in_folder", { path }),
   libraryOverview: () => call<LibraryOverview>("library_overview"),
   analyzeAssets: (ids: number[]) => call<number[]>("analyze_assets", { ids }),
+  exportBackup: (dest: string) =>
+    call<{ files: number; bytes: number }>("export_backup", { dest }),
+  importBackup: (src: string) =>
+    call<{ assets: number; videos: number; bytes: number }>("import_backup", { src }),
+  confirmImport: () => call<void>("confirm_import"),
+  restartApp: () => call<void>("restart_app"),
   listTasks: (status?: string) =>
     call<AgentTask[]>("list_tasks", { status: status ?? null }),
   getTask: (id: number) =>
@@ -73,6 +78,12 @@ export const api = {
   copyText: (text: string) => call<void>("copy_to_clipboard", { text }),
   startCollection: () =>
     call<{ platform: string; count: number; task_id: number }[]>("start_collection"),
+  startDouyinSync: () => call<number>("start_douyin_sync"),
+  listDouyinPosts: () => call<DouyinPost[]>("list_douyin_posts"),
+  moderateDouyinViolation: (awemeId: string) =>
+    call<number>("moderate_douyin_violation", { awemeId }),
+  moderateAllViolations: () => call<number>("moderate_all_violations"),
+  openUrl: (url: string) => call<void>("open_url", { url }),
   generateCopy: (assetId: number) => call<number>("generate_copy", { assetId }),
   getCopy: (assetId: number) => call<ContentCopy | null>("get_copy", { assetId }),
   checkOllama: () => call<boolean>("check_ollama"),

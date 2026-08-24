@@ -89,13 +89,14 @@ impl AppState {
                 condition_basis: s.condition_basis.clone(),
             }
         };
-        let (node_bin, script, collector_script, ytdlp) = {
+        let (node_bin, script, collector_script, ytdlp, douyin_sync_script) = {
             let s = self.settings.read().expect("settings lock poisoned");
             (
                 s.node_bin.clone(),
                 self.resolve_path(&s.publisher_script),
                 self.resolve_path(&s.collector_script),
                 s.ytdlp_path.clone(),
+                self.resolve_path(&s.douyin_sync_script),
             )
         };
         let mut runtime = AgentRuntime::new(&self.db, self.store.clone());
@@ -104,7 +105,19 @@ impl AppState {
             node_bin.clone(),
             script,
         )));
-        runtime.register(Box::new(CollectorAgent::new(node_bin, collector_script, ytdlp)));
+        runtime.register(Box::new(CollectorAgent::new(
+            node_bin.clone(),
+            collector_script,
+            ytdlp,
+        )));
+        runtime.register(Box::new(crate::agents::douyin_sync::DouyinSyncAgent::new(
+            node_bin.clone(),
+            douyin_sync_script.clone(),
+        )));
+        runtime.register(Box::new(crate::agents::douyin_moderate::DouyinModerateAgent::new(
+            node_bin,
+            douyin_sync_script.with_file_name("moderate.js"),
+        )));
         let (ollama_url, llm_model) = {
             let s = self.settings.read().expect("settings lock poisoned");
             (s.ollama_url.clone(), s.llm_model.clone())

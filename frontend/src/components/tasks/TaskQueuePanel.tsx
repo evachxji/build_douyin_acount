@@ -37,6 +37,33 @@ function TaskResult({ task, asset }: { task: AgentTask; asset?: VideoAsset }) {
         </span>
       );
     }
+    // 同步任务进行中：显示已同步条数与当前页。
+    if (task.agent_name === "douyin_sync" && task.status === "RUNNING") {
+      const p = (task.payload.progress ?? {}) as {
+        synced?: number;
+        message?: string;
+      };
+      const text = p.message || `已同步 ${p.synced ?? 0} 条`;
+      return (
+        <span className="min-w-0 flex-1 truncate text-paper/85" title={text}>
+          {text}
+        </span>
+      );
+    }
+    // 违规处理进行中：显示处理进度。
+    if (task.agent_name === "douyin_moderate" && task.status === "RUNNING") {
+      const p = (task.payload.progress ?? {}) as {
+        done?: number;
+        total?: number;
+        message?: string;
+      };
+      const text = p.message || `处理中 ${p.done ?? 0}/${p.total ?? 0}`;
+      return (
+        <span className="min-w-0 flex-1 truncate text-paper/85" title={text}>
+          {text}
+        </span>
+      );
+    }
     return task.error ? (
       <span className="min-w-0 flex-1 truncate text-bad" title={task.error}>
         {task.error}
@@ -74,6 +101,7 @@ function TaskResult({ task, asset }: { task: AgentTask; asset?: VideoAsset }) {
     if (stats) {
       if (typeof stats.candidates === "number") loss.push(`候选${stats.candidates}`);
       if (stats.resolve_failed) loss.push(`解析✗${stats.resolve_failed}`);
+      if (stats.fetch_failed) loss.push(`请求✗${stats.fetch_failed}`);
       if (stats.filtered_likes) loss.push(`超赞✗${stats.filtered_likes}`);
       if (stats.download_failed) loss.push(`下载✗${stats.download_failed}`);
     }
@@ -107,6 +135,28 @@ function TaskResult({ task, asset }: { task: AgentTask; asset?: VideoAsset }) {
     return (
       <span className="min-w-0 flex-1 truncate text-paper/85" title={`文案已生成 · ${title}`}>
         文案已生成 · {title}
+      </span>
+    );
+  }
+  if (task.agent_name === "douyin_sync") {
+    const synced = Number(payload.synced ?? 0);
+    const scheduled = Number(payload.scheduled ?? 0);
+    const violations = Number(payload.violations ?? 0);
+    const text = `已同步 ${synced} 条${scheduled > 0 ? ` · 定时 ${scheduled} 条` : ""}${violations > 0 ? ` · 违规 ${violations} 条` : ""}`;
+    return (
+      <span className="min-w-0 flex-1 truncate text-paper/85" title={text}>
+        {text}
+      </span>
+    );
+  }
+  if (task.agent_name === "douyin_moderate") {
+    const privated = Number(payload.privated ?? 0);
+    const published = Number(payload.published ?? 0);
+    const failed = Number(payload.failed ?? 0);
+    const text = `已设私密 ${privated} 条${published > 0 ? ` · 立即发布 ${published} 条` : ""}${failed > 0 ? ` · 失败 ${failed} 条` : ""}`;
+    return (
+      <span className="min-w-0 flex-1 truncate text-paper/85" title={text}>
+        {text}
       </span>
     );
   }

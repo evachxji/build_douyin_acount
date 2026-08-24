@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use tauri::State;
 
@@ -7,7 +7,7 @@ use crate::db::repos::assets::{AssetFilter, AssetsRepo};
 use crate::domain::analysis::AnalysisResult;
 use crate::domain::asset::{AssetStatus, VideoAsset};
 use crate::domain::error::{ApiError, DomainError};
-use crate::media::{ImportOptions, VideoManager};
+use crate::media::VideoManager;
 use crate::state::AppState;
 
 /// 资产列表筛选参数（前端透传，缺省即不过滤）。
@@ -84,39 +84,6 @@ pub fn update_asset_status(
     };
     AssetsRepo::new(&state.db).set_eliminate_reason(id, reason)?;
     Ok(())
-}
-
-/// 导入本地视频文件；单文件失败不阻断其余文件（失败以 warn 记录）。
-#[tauri::command]
-pub fn import_videos(
-    state: State<AppState>,
-    paths: Vec<String>,
-    platform: Option<String>,
-) -> Result<Vec<VideoAsset>, ApiError> {
-    let manager = VideoManager::new(&state.db, state.store.clone());
-    let platform = platform.unwrap_or_else(|| "local".to_string());
-    let mut imported = Vec::new();
-    for p in &paths {
-        let path = Path::new(p);
-        let file_name = path
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        match manager.import_file(
-            path,
-            ImportOptions {
-                source_platform: platform.clone(),
-                title: Some(file_name.clone()),
-                source_url: None,
-                author: None,
-                dedup_key: Some(format!("local:{file_name}")),
-            },
-        ) {
-            Ok(asset) => imported.push(asset),
-            Err(e) => tracing::warn!("import failed for {p}: {e}"),
-        }
-    }
-    Ok(imported)
 }
 
 /// 在系统文件管理器中定位并选中视频文件（Windows 资源管理器 /select）。
