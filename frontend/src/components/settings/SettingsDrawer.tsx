@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api/client";
-import type { AppSettings, WhisperModelInfo } from "../../api/types";
+import type { AiProvider, AppSettings, WhisperModelInfo } from "../../api/types";
 import { cleanConditions } from "../../lib/format";
 import { WhisperModelDialog } from "./WhisperModelDialog";
 
@@ -27,6 +27,12 @@ const EMPTY: AppSettings = {
   tiktok_ratio: 0.3,
   instagram_ratio: 0.7,
   max_likes: 1_000_000,
+  vision_provider: "ollama",
+  llm_provider: "ollama",
+  openai_base_url: "https://api.kimi.com/coding/v1",
+  openai_api_key: "",
+  openai_vision_model: "k3-256k",
+  openai_llm_model: "k3-256k",
 };
 
 const conditionField =
@@ -167,17 +173,88 @@ export function SettingsDrawer({
 
         <div className="mt-4 grid flex-1 grid-cols-2 content-start gap-x-4 gap-y-3 overflow-y-auto text-sm">
           <label className="block">
-            <span className="text-xs text-mute">Ollama 地址</span>
-            <input className={field} value={settings.ollama_url} onChange={(e) => set({ ollama_url: e.target.value })} />
+            <span className="text-xs text-mute">视觉模型（Vision）提供方</span>
+            <select
+              className={field}
+              value={settings.vision_provider}
+              onChange={(e) => set({ vision_provider: e.target.value as AiProvider })}
+            >
+              <option value="ollama">本地 Ollama</option>
+              <option value="openai">云端 OpenAI 兼容（Kimi 等）</option>
+            </select>
           </label>
           <label className="block">
-            <span className="text-xs text-mute">视觉模型（Vision）</span>
-            <input className={field} value={settings.vision_model} onChange={(e) => set({ vision_model: e.target.value })} />
+            <span className="text-xs text-mute">文本模型（LLM）提供方</span>
+            <select
+              className={field}
+              value={settings.llm_provider}
+              onChange={(e) => set({ llm_provider: e.target.value as AiProvider })}
+            >
+              <option value="ollama">本地 Ollama</option>
+              <option value="openai">云端 OpenAI 兼容（Kimi 等）</option>
+            </select>
           </label>
-          <label className="block">
-            <span className="text-xs text-mute">文本模型（LLM）</span>
-            <input className={field} value={settings.llm_model} onChange={(e) => set({ llm_model: e.target.value })} />
-          </label>
+          {(settings.vision_provider === "ollama" || settings.llm_provider === "ollama") && (
+            <>
+              <div className="col-span-2 border-t border-line pt-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-mute">本地 AI（Ollama）</p>
+              </div>
+              <label className="block">
+                <span className="text-xs text-mute">Ollama 地址</span>
+                <input className={field} value={settings.ollama_url} onChange={(e) => set({ ollama_url: e.target.value })} />
+              </label>
+              {settings.vision_provider === "ollama" && (
+                <label className="block">
+                  <span className="text-xs text-mute">视觉模型（Vision）</span>
+                  <input className={field} value={settings.vision_model} onChange={(e) => set({ vision_model: e.target.value })} />
+                </label>
+              )}
+              {settings.llm_provider === "ollama" && (
+                <label className="block">
+                  <span className="text-xs text-mute">文本模型（LLM）</span>
+                  <input className={field} value={settings.llm_model} onChange={(e) => set({ llm_model: e.target.value })} />
+                </label>
+              )}
+            </>
+          )}
+          {(settings.vision_provider === "openai" || settings.llm_provider === "openai") && (
+            <>
+              <div className="col-span-2 border-t border-line pt-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-mute">云端 AI（OpenAI 兼容）</p>
+              </div>
+              <label className="block">
+                <span className="text-xs text-mute">Base URL</span>
+                <input
+                  className={field}
+                  value={settings.openai_base_url}
+                  placeholder="https://api.kimi.com/coding/v1"
+                  onChange={(e) => set({ openai_base_url: e.target.value })}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-mute">API Key</span>
+                <input
+                  type="password"
+                  className={field}
+                  value={settings.openai_api_key}
+                  placeholder="sk-..."
+                  onChange={(e) => set({ openai_api_key: e.target.value })}
+                />
+              </label>
+              {settings.vision_provider === "openai" && (
+                <label className="block">
+                  <span className="text-xs text-mute">云端视觉模型</span>
+                  <input className={field} value={settings.openai_vision_model} onChange={(e) => set({ openai_vision_model: e.target.value })} />
+                </label>
+              )}
+              {settings.llm_provider === "openai" && (
+                <label className="block">
+                  <span className="text-xs text-mute">云端文本模型</span>
+                  <input className={field} value={settings.openai_llm_model} onChange={(e) => set({ openai_llm_model: e.target.value })} />
+                </label>
+              )}
+            </>
+          )}
           <label className="block">
             <span className="text-xs text-mute">Whisper 模型（语音识别）</span>
             <select

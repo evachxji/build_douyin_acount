@@ -96,6 +96,8 @@ export interface LibraryOverview {
   statuses: StatusCount[];
 }
 
+export type AiProvider = "ollama" | "openai";
+
 export interface AppSettings {
   ollama_url: string;
   vision_model: string;
@@ -118,6 +120,15 @@ export interface AppSettings {
   tiktok_ratio: number;
   instagram_ratio: number;
   max_likes: number;
+  /** 视觉模型提供方：ollama 本地 / openai OpenAI 兼容云端。 */
+  vision_provider: AiProvider;
+  /** 文本 LLM 提供方（文案生成跟随此开关）。 */
+  llm_provider: AiProvider;
+  /** OpenAI 兼容云端配置（vision 与 llm 共用）。 */
+  openai_base_url: string;
+  openai_api_key: string;
+  openai_vision_model: string;
+  openai_llm_model: string;
 }
 
 export type DraftStatus = "DRAFT" | "FILLED" | "PUBLISHED" | "CANCELLED";

@@ -534,3 +534,122 @@ async fn ai_client_surfaces_http_errors() {
     let err = client.chat("m", vec![], None).await.expect_err("500 must fail");
     assert!(err.to_string().contains("500"), "got: {err}");
 }
+
+// ---- 云端视觉并发帧分析：prefer_concurrency=true 并发、false 串行 ----
+
+struct MultiFrameExtractor;
+impl FrameExtractor for MultiFrameExtractor {
+    fn extract(&self, _video: &std::path::Path, _out_dir: &std::path::Path) -> Result<Vec<PathBuf>, DomainError> {
+        Ok((1..=4).map(|i| PathBuf::from(format!("frame_{i}.jpg"))).collect())
+    }
+    fn extract_audio(&self, _video: &std::path::Path, _out_dir: &std::path::Path) -> Result<PathBuf, DomainError> {
+        Ok(PathBuf::from("audio.wav"))
+    }
+}
+
+struct ConcurrentVision {
+    prefer: bool,
+    active: std::sync::atomic::AtomicUsize,
+    max_seen: std::sync::atomic::AtomicUsize,
+}
+
+impl Vision for ConcurrentVision {
+    fn analyze_frame(&self, path: &std::path::Path) -> Result<build_douyin_acount_lib::analysis::pipeline::FrameInsight, DomainError> {
+        use std::sync::atomic::Ordering;
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_seen.fetch_max(now, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        Ok(build_douyin_acount_lib::analysis::pipeline::FrameInsight {
+            description: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            english_text: false,
+        })
+    }
+    fn prefer_concurrency(&self) -> bool {
+        self.prefer
+    }
+}
+
+#[derive(Default)]
+struct RecordingLlm(std::sync::Mutex<Vec<String>>);
+
+impl Llm for RecordingLlm {
+    fn synthesize(&self, req: SynthesisRequest) -> Result<AnalysisJson, DomainError> {
+        *self.0.lock().expect("lock") = req.frames.iter().map(|f| f.description.clone()).collect();
+        Ok(AnalysisJson {
+            category: "测试".to_string(),
+            tags: vec![],
+            quality_score: 80,
+            has_foreign_language: false,
+            has_large_amount_english_subtitle: false,
+            summary: String::new(),
+            recommended_caption: String::new(),
+            conditions: vec![],
+        })
+    }
+
+    fn judge_conditions(
+        &self,
+        _title: Option<&str>,
+        _asr_text: &str,
+        _asr_language: Option<&str>,
+        _items: &[(usize, String)],
+    ) -> Result<Vec<build_douyin_acount_lib::analysis::llm::IndexVerdict>, DomainError> {
+        Ok(vec![])
+    }
+
+    fn classify_condition_bases(
+        &self,
+        _conditions: &[String],
+    ) -> Result<std::collections::HashMap<String, build_douyin_acount_lib::domain::analysis::ConditionBasis>, DomainError> {
+        Ok(std::collections::HashMap::new())
+    }
+}
+
+fn build_concurrency_pipeline(prefer: bool) -> (AnalysisPipeline, Arc<ConcurrentVision>, Arc<RecordingLlm>) {
+    let vision = Arc::new(ConcurrentVision {
+        prefer,
+        active: std::sync::atomic::AtomicUsize::new(0),
+        max_seen: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let llm = Arc::new(RecordingLlm::default());
+    let pipeline = AnalysisPipeline::new(
+        Arc::new(MultiFrameExtractor),
+        Arc::new(FakeAsr),
+        vision.clone(),
+        llm.clone(),
+    );
+    (pipeline, vision, llm)
+}
+
+#[test]
+fn cloud_vision_analyzes_frames_concurrently_and_in_frame_order() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let video = dir.path().join("v.mp4");
+    std::fs::write(&video, b"fake").expect("write");
+    let (pipeline, vision, llm) = build_concurrency_pipeline(true);
+    pipeline
+        .analyze(&video, &dir.path().join("work"), 1, None, &[], &[], &Default::default())
+        .expect("analyze");
+    let max = vision.max_seen.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(max > 1, "cloud vision must analyze frames concurrently, max_seen={max}");
+    let order = llm.0.lock().expect("lock").clone();
+    assert_eq!(
+        order,
+        vec!["frame_1.jpg", "frame_2.jpg", "frame_3.jpg", "frame_4.jpg"],
+        "并发结果必须按帧序交付给 LLM 综合"
+    );
+}
+
+#[test]
+fn local_vision_analyzes_frames_serially() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let video = dir.path().join("v.mp4");
+    std::fs::write(&video, b"fake").expect("write");
+    let (pipeline, vision, _llm) = build_concurrency_pipeline(false);
+    pipeline
+        .analyze(&video, &dir.path().join("work"), 1, None, &[], &[], &Default::default())
+        .expect("analyze");
+    let max = vision.max_seen.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(max, 1, "local vision must stay serial, max_seen={max}");
+}

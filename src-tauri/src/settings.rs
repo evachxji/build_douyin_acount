@@ -43,6 +43,21 @@ pub struct AppSettings {
     /// 每个条件的判定依据（条件名 -> 画面/音频/不限），由 LLM 自动分类或用户手工指定。
     #[serde(default)]
     pub condition_basis: HashMap<String, ConditionBasis>,
+    /// 视觉模型提供方：ollama（本地）/ openai（OpenAI 兼容云端，如 Kimi）。
+    #[serde(default = "default_ai_provider")]
+    pub vision_provider: String,
+    /// 文本 LLM 提供方：ollama / openai（文案生成跟随此开关）。
+    #[serde(default = "default_ai_provider")]
+    pub llm_provider: String,
+    /// OpenAI 兼容云端配置（vision 与 llm 共用 base_url 与 key）。
+    #[serde(default = "default_openai_base_url")]
+    pub openai_base_url: String,
+    #[serde(default)]
+    pub openai_api_key: String,
+    #[serde(default = "default_openai_model")]
+    pub openai_vision_model: String,
+    #[serde(default = "default_openai_model")]
+    pub openai_llm_model: String,
 }
 
 impl Default for AppSettings {
@@ -69,12 +84,30 @@ impl Default for AppSettings {
             hit_conditions: Vec::new(),
             exclude_conditions: Vec::new(),
             condition_basis: HashMap::new(),
+            vision_provider: default_ai_provider(),
+            llm_provider: default_ai_provider(),
+            openai_base_url: default_openai_base_url(),
+            openai_api_key: String::new(),
+            openai_vision_model: default_openai_model(),
+            openai_llm_model: default_openai_model(),
         }
     }
 }
 
 fn default_douyin_sync_script() -> String {
     "scripts/douyin-sync/sync.js".to_string()
+}
+
+fn default_ai_provider() -> String {
+    "ollama".to_string()
+}
+
+fn default_openai_base_url() -> String {
+    "https://api.kimi.com/coding/v1".to_string()
+}
+
+fn default_openai_model() -> String {
+    "k3-256k".to_string()
 }
 
 /// app_settings 表访问层：整个设置序列化为 JSON 存在 `app` 键下。

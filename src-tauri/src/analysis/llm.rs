@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::analysis::{ConditionBasis, ConditionVerdict};
 use crate::domain::error::DomainError;
 
+use super::openai::OpenAiClient;
 use super::pipeline::{FrameInsight, SynthesisRequest};
 use super::AiClient;
 
@@ -140,15 +141,8 @@ fn parse_index_verdicts(raw: &str) -> Result<Vec<IndexVerdict>, DomainError> {
         .collect())
 }
 
-/// 让 LLM 自动判断每个筛选条件主要依据「画面 / 音频 / 不限」哪种内容判定。
-pub fn classify_condition_bases(
-    client: &AiClient,
-    model: &str,
-    conditions: &[String],
-) -> Result<HashMap<String, ConditionBasis>, DomainError> {
-    if conditions.is_empty() {
-        return Ok(HashMap::new());
-    }
+/// 组装条件分类的 system/user 提示词（本地/云端实现共用）。
+fn build_classify_prompt(conditions: &[String]) -> (&'static str, String) {
     let list = conditions
         .iter()
         .enumerate()
@@ -158,19 +152,12 @@ pub fn classify_condition_bases(
     let user = format!(
         "以下是短视频筛选条件清单：\n{list}\n\n请判断每一条条件主要依据哪种内容判断是否命中：\n「画面」：只能或主要靠视频画面判断（如 色情、大量英文字幕、宠物、风景）\n「音频」：只能或主要靠语音/转写判断（如 长中文对话、长英文对话、旁白解说）\n「不限」：画面或音频都可以判断（如 搞笑、治愈）\n输出严格 JSON：{{\"conditions\": [{{\"index\": 编号, \"basis\": \"画面|音频|不限\"}}]}}"
     );
-    let system = "你是一个内容筛选条件分类助手。只输出 JSON，不要输出其他文字。";
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
-    let raw = rt.block_on(async {
-        client
-            .chat(
-                model,
-                vec![super::ChatMessage::system(system), super::ChatMessage::user(user)],
-                Some("json"),
-            )
-            .await
-    })?;
-    let value: serde_json::Value = serde_json::from_str(&raw)
+    ("你是一个内容筛选条件分类助手。只输出 JSON，不要输出其他文字。", user)
+}
+
+/// 解析条件分类响应并映射回条件名（本地/云端实现共用）。
+fn parse_classify_response(raw: &str, conditions: &[String]) -> Result<HashMap<String, ConditionBasis>, DomainError> {
+    let value: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| DomainError::InvalidData(format!("classify json invalid: {e}")))?;
     let mut out = HashMap::new();
     for c in value.get("conditions").and_then(|v| v.as_array()).into_iter().flatten() {
@@ -193,52 +180,103 @@ pub fn classify_condition_bases(
     Ok(out)
 }
 
+/// 让 LLM 自动判断每个筛选条件主要依据「画面 / 音频 / 不限」哪种内容判定。
+pub fn classify_condition_bases(
+    client: &AiClient,
+    model: &str,
+    conditions: &[String],
+) -> Result<HashMap<String, ConditionBasis>, DomainError> {
+    if conditions.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let (system, user) = build_classify_prompt(conditions);
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
+    let raw = rt.block_on(async {
+        client
+            .chat(
+                model,
+                vec![super::ChatMessage::system(system), super::ChatMessage::user(user)],
+                Some("json"),
+            )
+            .await
+    })?;
+    parse_classify_response(&raw, conditions)
+}
+
 /// 基于 Ollama 的 LLM 综合实现。
 pub struct OllamaLlm {
     pub client: AiClient,
     pub model: String,
 }
 
+/// 组装 LLM 综合判定的 system/user 提示词（本地/云端实现共用）。
+fn build_synthesize_prompt(req: &SynthesisRequest) -> (&'static str, String) {
+    let frames_text = req
+        .frames
+        .iter()
+        .enumerate()
+        .map(|(i, f)| format!("[{i}] {}", describe_frame(f)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let asr_text = req
+        .asr_text
+        .as_deref()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .unwrap_or("（无对白/音频转写为空）");
+    let mut filter_lines = Vec::new();
+    for (i, c) in &req.conditions {
+        filter_lines.push(format!("{i}. {c}"));
+    }
+    let filter_section = if filter_lines.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\n筛选要求（按编号逐条判定；conditions 中每条 index 必须与编号一致）：\n{}",
+            filter_lines.join("\n")
+        )
+    };
+    let user = format!(
+        "视频元信息：\n标题：{}\n\n关键帧内容：\n{frames_text}\n\n音频转写（语言：{}）：\n{}{filter_section}",
+        req.title.as_deref().unwrap_or("未知"),
+        req.asr_language.as_deref().unwrap_or("unknown"),
+        asr_text
+    );
+    (SYNTHESIZE_PROMPT, user)
+}
+
+/// 组装音频类条件预检的 system/user 提示词（本地/云端实现共用）。
+fn build_judge_prompt(
+    title: Option<&str>,
+    asr_text: &str,
+    asr_language: Option<&str>,
+    items: &[(usize, String)],
+) -> (&'static str, String) {
+    let lines = items
+        .iter()
+        .map(|(i, n)| format!("{i}. {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let user = format!(
+        "视频标题：{}\n音频转写（语言：{}）：\n{}\n\n请仅依据上述标题与音频转写逐条判定以下条件是否命中（不要推测画面内容）：\n{lines}\n\n注意：音频转写可能混有背景音乐歌词。若条件针对对话/旁白/说话内容（如 长对话、非中文对话、英文对话），明显的歌词/吟唱（押韵、重复、片段化、旋律性）不计入，一律判定未命中；若条件针对歌曲/音乐本身（如 英文歌曲、BGM），则照常依据转写判定。\n\n输出严格 JSON：{{\"conditions\": [{{\"index\": 编号, \"hit\": true或false}}]}}",
+        title.unwrap_or("未知"),
+        asr_language.unwrap_or("unknown"),
+        asr_text
+    );
+    ("你是一个短视频内容筛选助手。只输出 JSON，不要输出其他文字。", user)
+}
+
 impl super::pipeline::Llm for OllamaLlm {
     fn synthesize(&self, req: SynthesisRequest) -> Result<AnalysisJson, DomainError> {
-        let frames_text = req
-            .frames
-            .iter()
-            .enumerate()
-            .map(|(i, f)| format!("[{i}] {}", describe_frame(f)))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let asr_text = req
-            .asr_text
-            .as_deref()
-            .map(|t| t.trim())
-            .filter(|t| !t.is_empty())
-            .unwrap_or("（无对白/音频转写为空）");
-        let mut filter_lines = Vec::new();
-        for (i, c) in &req.conditions {
-            filter_lines.push(format!("{i}. {c}"));
-        }
-        let filter_section = if filter_lines.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "\n\n筛选要求（按编号逐条判定；conditions 中每条 index 必须与编号一致）：\n{}",
-                filter_lines.join("\n")
-            )
-        };
-        let user = format!(
-            "视频元信息：\n标题：{}\n\n关键帧内容：\n{frames_text}\n\n音频转写（语言：{}）：\n{}{filter_section}",
-            req.title.as_deref().unwrap_or("未知"),
-            req.asr_language.as_deref().unwrap_or("unknown"),
-            asr_text
-        );
+        let (system, user) = build_synthesize_prompt(&req);
         // 当前为同步 trait：阻塞式调用本地 HTTP 服务。
         let rt = tokio::runtime::Runtime::new().map_err(|e| DomainError::InvalidData(format!("rt: {e}")))?;
         let raw = rt.block_on(async {
             self.client
                 .chat(
                     &self.model,
-                    vec![super::ChatMessage::system(SYNTHESIZE_PROMPT), super::ChatMessage::user(user)],
+                    vec![super::ChatMessage::system(system), super::ChatMessage::user(user)],
                     Some("json"),
                 )
                 .await
@@ -253,18 +291,7 @@ impl super::pipeline::Llm for OllamaLlm {
         asr_language: Option<&str>,
         items: &[(usize, String)],
     ) -> Result<Vec<IndexVerdict>, DomainError> {
-        let lines = items
-            .iter()
-            .map(|(i, n)| format!("{i}. {n}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let user = format!(
-            "视频标题：{}\n音频转写（语言：{}）：\n{}\n\n请仅依据上述标题与音频转写逐条判定以下条件是否命中（不要推测画面内容）：\n{lines}\n\n注意：音频转写可能混有背景音乐歌词。若条件针对对话/旁白/说话内容（如 长对话、非中文对话、英文对话），明显的歌词/吟唱（押韵、重复、片段化、旋律性）不计入，一律判定未命中；若条件针对歌曲/音乐本身（如 英文歌曲、BGM），则照常依据转写判定。\n\n输出严格 JSON：{{\"conditions\": [{{\"index\": 编号, \"hit\": true或false}}]}}",
-            title.unwrap_or("未知"),
-            asr_language.unwrap_or("unknown"),
-            asr_text
-        );
-        let system = "你是一个短视频内容筛选助手。只输出 JSON，不要输出其他文字。";
+        let (system, user) = build_judge_prompt(title, asr_text, asr_language, items);
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
         let raw = rt.block_on(async {
@@ -284,6 +311,47 @@ impl super::pipeline::Llm for OllamaLlm {
         conditions: &[String],
     ) -> Result<HashMap<String, ConditionBasis>, DomainError> {
         classify_condition_bases(&self.client, &self.model, conditions)
+    }
+}
+
+/// 基于 OpenAI 兼容云端（Kimi 等）的 LLM 综合实现。
+pub struct OpenAiLlm {
+    pub client: OpenAiClient,
+    pub model: String,
+}
+
+impl super::pipeline::Llm for OpenAiLlm {
+    fn synthesize(&self, req: SynthesisRequest) -> Result<AnalysisJson, DomainError> {
+        let (system, user) = build_synthesize_prompt(&req);
+        let rt = tokio::runtime::Runtime::new().map_err(|e| DomainError::InvalidData(format!("rt: {e}")))?;
+        let raw = rt.block_on(self.client.chat(&self.model, system, &user, true))?;
+        parse_analysis_json(&raw)
+    }
+
+    fn judge_conditions(
+        &self,
+        title: Option<&str>,
+        asr_text: &str,
+        asr_language: Option<&str>,
+        items: &[(usize, String)],
+    ) -> Result<Vec<IndexVerdict>, DomainError> {
+        let (system, user) = build_judge_prompt(title, asr_text, asr_language, items);
+        let rt = tokio::runtime::Runtime::new().map_err(|e| DomainError::InvalidData(format!("rt: {e}")))?;
+        let raw = rt.block_on(self.client.chat(&self.model, system, &user, true))?;
+        parse_index_verdicts(&raw)
+    }
+
+    fn classify_condition_bases(
+        &self,
+        conditions: &[String],
+    ) -> Result<HashMap<String, ConditionBasis>, DomainError> {
+        if conditions.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let (system, user) = build_classify_prompt(conditions);
+        let rt = tokio::runtime::Runtime::new().map_err(|e| DomainError::InvalidData(format!("rt: {e}")))?;
+        let raw = rt.block_on(self.client.chat(&self.model, system, &user, true))?;
+        parse_classify_response(&raw, conditions)
     }
 }
 

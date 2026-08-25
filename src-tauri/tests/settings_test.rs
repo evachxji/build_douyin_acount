@@ -28,6 +28,12 @@ fn settings_defaults_when_nothing_stored() {
     assert_eq!(settings.tiktok_ratio, 0.3);
     assert_eq!(settings.instagram_ratio, 0.7);
     assert_eq!(settings.max_likes, 1_000_000);
+    assert_eq!(settings.vision_provider, "ollama");
+    assert_eq!(settings.llm_provider, "ollama");
+    assert_eq!(settings.openai_base_url, "https://api.kimi.com/coding/v1");
+    assert!(settings.openai_api_key.is_empty());
+    assert_eq!(settings.openai_vision_model, "k3-256k");
+    assert_eq!(settings.openai_llm_model, "k3-256k");
 }
 
 #[test]
@@ -56,6 +62,12 @@ fn settings_roundtrip_persists_fields() {
         hit_conditions: vec!["宠物".to_string(), "风景".to_string()],
         exclude_conditions: vec!["色情".to_string()],
         condition_basis: HashMap::new(),
+        vision_provider: "openai".to_string(),
+        llm_provider: "ollama".to_string(),
+        openai_base_url: "https://api.moonshot.cn/v1".to_string(),
+        openai_api_key: "sk-test-key".to_string(),
+        openai_vision_model: "kimi-k2.5".to_string(),
+        openai_llm_model: "kimi-k2.6".to_string(),
     };
     repo.save(&custom).expect("save");
 
@@ -104,4 +116,13 @@ fn settings_load_legacy_json_without_conditions_keeps_defaults() {
         loaded.douyin_sync_script, "scripts/douyin-sync/sync.js",
         "missing douyin_sync_script falls back to default instead of resetting all settings"
     );
+    assert_eq!(loaded.vision_provider, "ollama", "missing vision_provider falls back to local");
+    assert_eq!(loaded.llm_provider, "ollama", "missing llm_provider falls back to local");
+    assert_eq!(
+        loaded.openai_base_url, "https://api.kimi.com/coding/v1",
+        "missing openai_base_url falls back to default"
+    );
+    assert!(loaded.openai_api_key.is_empty(), "missing openai_api_key defaults to empty");
+    assert_eq!(loaded.openai_vision_model, "k3-256k");
+    assert_eq!(loaded.openai_llm_model, "k3-256k");
 }

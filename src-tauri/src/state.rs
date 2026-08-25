@@ -3,14 +3,15 @@ use std::sync::{Arc, RwLock};
 
 use crate::agents::filter::FilterRules;
 use crate::agents::collector::CollectorAgent;
-use crate::agents::content::{ContentAgent, OllamaCopyGenerator};
+use crate::agents::content::{ContentAgent, CopyGenerator, OllamaCopyGenerator, OpenAiCopyGenerator};
 use crate::agents::runtime::AgentRuntime;
 use crate::agents::vision::VisionAgent;
 use crate::analysis::asr::WhisperAsr;
 use crate::analysis::frames::FfmpegFrameExtractor;
-use crate::analysis::llm::OllamaLlm;
-use crate::analysis::pipeline::AnalysisPipeline;
-use crate::analysis::vision::OllamaVision;
+use crate::analysis::llm::{OllamaLlm, OpenAiLlm};
+use crate::analysis::openai::OpenAiClient;
+use crate::analysis::pipeline::{AnalysisPipeline, Llm, Vision};
+use crate::analysis::vision::{OllamaVision, OpenAiVision};
 use crate::analysis::AiClient;
 use crate::db::Database;
 use crate::domain::error::DomainError;
@@ -53,30 +54,68 @@ impl AppState {
     }
 
     /// 按当前设置装配完整分析管线（抽帧 → Whisper → Vision → LLM）。
+    /// vision / llm 各自按 provider 开关选择本地 Ollama 或 OpenAI 兼容云端实现。
     pub fn build_pipeline(&self) -> Result<AnalysisPipeline, DomainError> {
         let s = self.settings.read().expect("settings lock poisoned");
         let script = self.resolve_path(&s.whisper_script);
-        // 已安装的模型传本地目录绝对路径（内置基座）；未安装/自定义值原样透传给 faster-whisper。
-        let whisper_model = crate::whisper_models::resolve_model_arg(&self.store, &s.whisper_model);
+        let whisper_model = s.whisper_model.clone();
         // 与脚本一致：解释器路径也解析为绝对路径（应用进程 cwd 在 src-tauri 下，相对路径会找不到）。
         let python = self.resolve_path(&s.whisper_python).to_string_lossy().into_owned();
-        let vision_model = s.vision_model.clone();
-        let llm_model = s.llm_model.clone();
-        let ollama_url = s.ollama_url.clone();
+        let vision = Self::build_vision(&s)?;
+        let llm = Self::build_llm(&s)?;
         drop(s);
 
         Ok(AnalysisPipeline::new(
             Arc::new(FfmpegFrameExtractor),
             Arc::new(WhisperAsr::new(script, whisper_model).with_python(python)),
-            Arc::new(OllamaVision {
-                client: AiClient::new(ollama_url.clone())?,
-                model: vision_model,
-            }),
-            Arc::new(OllamaLlm {
-                client: AiClient::new(ollama_url)?,
-                model: llm_model,
-            }),
+            vision,
+            llm,
         ))
+    }
+
+    /// 按 vision_provider 装配视觉实现（ollama 本地 / openai 云端）。
+    fn build_vision(s: &AppSettings) -> Result<Arc<dyn Vision>, DomainError> {
+        if s.vision_provider == "openai" {
+            Ok(Arc::new(OpenAiVision {
+                client: OpenAiClient::new(&s.openai_base_url, &s.openai_api_key)?,
+                model: s.openai_vision_model.clone(),
+            }))
+        } else {
+            Ok(Arc::new(OllamaVision {
+                client: AiClient::new(s.ollama_url.clone())?,
+                model: s.vision_model.clone(),
+            }))
+        }
+    }
+
+    /// 按 llm_provider 装配文本 LLM 实现（ollama 本地 / openai 云端）。
+    fn build_llm(s: &AppSettings) -> Result<Arc<dyn Llm>, DomainError> {
+        if s.llm_provider == "openai" {
+            Ok(Arc::new(OpenAiLlm {
+                client: OpenAiClient::new(&s.openai_base_url, &s.openai_api_key)?,
+                model: s.openai_llm_model.clone(),
+            }))
+        } else {
+            Ok(Arc::new(OllamaLlm {
+                client: AiClient::new(s.ollama_url.clone())?,
+                model: s.llm_model.clone(),
+            }))
+        }
+    }
+
+    /// 按 llm_provider 装配文案生成器（跟随文本 LLM 开关）。
+    fn build_copy_generator(s: &AppSettings) -> Result<Arc<dyn CopyGenerator>, DomainError> {
+        if s.llm_provider == "openai" {
+            Ok(Arc::new(OpenAiCopyGenerator {
+                client: OpenAiClient::new(&s.openai_base_url, &s.openai_api_key)?,
+                model: s.openai_llm_model.clone(),
+            }))
+        } else {
+            Ok(Arc::new(OllamaCopyGenerator {
+                client: AiClient::new(s.ollama_url.clone())?,
+                model: s.llm_model.clone(),
+            }))
+        }
     }
 
     /// 装配 Agent Runtime 并注册 vision / publisher agent。
@@ -123,14 +162,11 @@ impl AppState {
             node_bin,
             douyin_sync_script,
         )));
-        let (ollama_url, llm_model) = {
+        let copy_generator = {
             let s = self.settings.read().expect("settings lock poisoned");
-            (s.ollama_url.clone(), s.llm_model.clone())
+            Self::build_copy_generator(&s)?
         };
-        runtime.register(Box::new(ContentAgent::new(Arc::new(OllamaCopyGenerator {
-            client: AiClient::new(ollama_url)?,
-            model: llm_model,
-        }))));
+        runtime.register(Box::new(ContentAgent::new(copy_generator)));
         Ok(runtime)
     }
 }

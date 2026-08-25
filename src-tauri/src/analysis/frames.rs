@@ -37,7 +37,9 @@ impl FrameExtractor for FfmpegFrameExtractor {
                 "-i",
                 video.to_string_lossy().as_ref(),
                 "-vf",
-                &format!("fps={fps:.3}"),
+                // 抽帧均匀分布 + 长边限制 1280：控制上传体积与云端视觉 token 消耗，
+                // 本地模型处理小图也更快（单引号是 ffmpeg filter 语法，非 shell 引用）。
+                &format!("fps={fps:.3},scale='min(iw,1280)':'min(ih,1280)':force_original_aspect_ratio=decrease"),
                 "-q:v",
                 "2",
                 pattern.to_string_lossy().as_ref(),

@@ -37,6 +37,10 @@ pub trait FrameExtractor: Send + Sync {
 /// 视觉理解能力。
 pub trait Vision: Send + Sync {
     fn analyze_frame(&self, path: &Path) -> Result<FrameInsight, DomainError>;
+    /// 是否倾向并发分析多帧：云端 API 无本地算力约束可并发，本地模型保持串行。
+    fn prefer_concurrency(&self) -> bool {
+        false
+    }
 }
 
 /// LLM 综合能力。
@@ -178,10 +182,29 @@ impl AnalysisPipeline {
         // 阶段2：抽帧 + 逐帧视觉 + LLM 综合（判定其余排除条件与命中条件）。
         let frames_dir = work_dir.join("frames");
         let frame_paths = self.frames.extract(video, &frames_dir)?;
-        let mut insights = Vec::with_capacity(frame_paths.len());
-        for p in &frame_paths {
-            insights.push(self.vision.analyze_frame(p)?);
-        }
+        // 云端视觉（prefer_concurrency）多帧并发；本地视觉保持串行（本地算力约束）。
+        let insights: Vec<FrameInsight> = if self.vision.prefer_concurrency() && frame_paths.len() > 1 {
+            std::thread::scope(|s| {
+                let handles: Vec<_> = frame_paths
+                    .iter()
+                    .map(|p| s.spawn(|| self.vision.analyze_frame(p)))
+                    .collect();
+                let mut out = Vec::with_capacity(handles.len());
+                for h in handles {
+                    let r = h
+                        .join()
+                        .map_err(|_| DomainError::InvalidData("frame analysis thread panicked".to_string()))?;
+                    out.push(r?);
+                }
+                Ok::<Vec<FrameInsight>, DomainError>(out)
+            })?
+        } else {
+            let mut out = Vec::with_capacity(frame_paths.len());
+            for p in &frame_paths {
+                out.push(self.vision.analyze_frame(p)?);
+            }
+            out
+        };
         let other_items: Vec<(usize, String)> = ordered_names
             .iter()
             .enumerate()

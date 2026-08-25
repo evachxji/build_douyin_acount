@@ -1,6 +1,7 @@
 pub mod asr;
 pub mod frames;
 pub mod llm;
+pub mod openai;
 pub mod pipeline;
 pub mod vision;
 

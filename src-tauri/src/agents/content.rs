@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::agents::{Agent, AgentContext, AgentOutcome};
+use crate::analysis::openai::OpenAiClient;
 use crate::analysis::{AiClient, ChatMessage};
 use crate::db::repos::analyses::AnalysesRepo;
 use crate::db::repos::content::{ContentRepo, StylesRepo};
@@ -15,6 +16,15 @@ pub trait CopyGenerator: Send + Sync {
     fn generate_copy(&self, style_prompt: &str, analysis_context: &str) -> Result<String, DomainError>;
 }
 
+/// 组装文案生成的 system 提示词（本地/云端实现共用）。
+fn build_copy_system_prompt(style_prompt: &str) -> String {
+    format!(
+        "你是抖音短视频运营文案专家。账号风格要求：{style_prompt}。\n\
+         只输出 JSON，不要任何多余文字：{{\"title\":\"抖音标题（≤30字，可带 emoji）\",\"body\":\"正文描述（1~3句）\",\"hashtags\":[\"话题1\",\"话题2\"]}}\n\
+         注意：body 必须是纯文案，不要出现任何 # 话题标签；话题词只放在 hashtags 数组里（发布时会追加在正文最后一行）。"
+    )
+}
+
 /// 基于 Ollama 的实现：同步包装异步 chat（与 Vision 管线一致）。
 pub struct OllamaCopyGenerator {
     pub client: AiClient,
@@ -23,23 +33,40 @@ pub struct OllamaCopyGenerator {
 
 impl CopyGenerator for OllamaCopyGenerator {
     fn generate_copy(&self, style_prompt: &str, analysis_context: &str) -> Result<String, DomainError> {
-        let system = format!(
-            "你是抖音短视频运营文案专家。账号风格要求：{style_prompt}。\n\
-             只输出 JSON，不要任何多余文字：{{\"title\":\"抖音标题（≤30字，可带 emoji）\",\"body\":\"正文描述（1~3句）\",\"hashtags\":[\"话题1\",\"话题2\"]}}\n\
-             注意：body 必须是纯文案，不要出现任何 # 话题标签；话题词只放在 hashtags 数组里（发布时会追加在正文最后一行）。"
-        );
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
         let raw = rt.block_on(async {
             self.client
                 .chat(
                     &self.model,
-                    vec![ChatMessage::system(system), ChatMessage::user(analysis_context)],
+                    vec![
+                        ChatMessage::system(build_copy_system_prompt(style_prompt)),
+                        ChatMessage::user(analysis_context),
+                    ],
                     Some("json"),
                 )
                 .await
         })?;
         Ok(raw)
+    }
+}
+
+/// 基于 OpenAI 兼容云端（Kimi 等）的实现。
+pub struct OpenAiCopyGenerator {
+    pub client: OpenAiClient,
+    pub model: String,
+}
+
+impl CopyGenerator for OpenAiCopyGenerator {
+    fn generate_copy(&self, style_prompt: &str, analysis_context: &str) -> Result<String, DomainError> {
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| DomainError::InvalidData(format!("tokio runtime: {e}")))?;
+        rt.block_on(self.client.chat(
+            &self.model,
+            &build_copy_system_prompt(style_prompt),
+            analysis_context,
+            true,
+        ))
     }
 }
 

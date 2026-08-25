@@ -8,15 +8,20 @@
 //!   WHISPER_PYTHON 默认 scripts/whisper-server/.venv/Scripts/python.exe
 //!   WHISPER_SCRIPT 默认 scripts/whisper-server/whisper_transcribe.py
 //!   WHISPER_MODEL  默认 base
+//!   VISION_PROVIDER / LLM_PROVIDER  默认 ollama；设 openai 走云端 OpenAI 兼容接口
+//!   OPENAI_BASE_URL 默认 https://api.kimi.com/coding/v1
+//!   OPENAI_API_KEY  云端必填
+//!   OPENAI_VISION_MODEL / OPENAI_LLM_MODEL  默认 k3-256k
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use build_douyin_acount_lib::agents::filter::FilterAgent;
 use build_douyin_acount_lib::analysis::frames::FfmpegFrameExtractor;
-use build_douyin_acount_lib::analysis::llm::OllamaLlm;
-use build_douyin_acount_lib::analysis::pipeline::AnalysisPipeline;
-use build_douyin_acount_lib::analysis::vision::OllamaVision;
+use build_douyin_acount_lib::analysis::llm::{OllamaLlm, OpenAiLlm};
+use build_douyin_acount_lib::analysis::openai::OpenAiClient;
+use build_douyin_acount_lib::analysis::pipeline::{AnalysisPipeline, Llm, Vision};
+use build_douyin_acount_lib::analysis::vision::{OllamaVision, OpenAiVision};
 use build_douyin_acount_lib::analysis::asr::WhisperAsr;
 use build_douyin_acount_lib::analysis::AiClient;
 
@@ -43,24 +48,43 @@ fn main() {
     let ollama_url = env_or("OLLAMA_URL", "http://localhost:11434");
     let vision_model = env_or("VISION_MODEL", "qwen2.5vl:7b");
     let llm_model = env_or("LLM_MODEL", "qwen2.5:7b");
+    let vision_provider = env_or("VISION_PROVIDER", "ollama");
+    let llm_provider = env_or("LLM_PROVIDER", "ollama");
+    let openai_base_url = env_or("OPENAI_BASE_URL", "https://api.kimi.com/coding/v1");
+    let openai_api_key = env_or("OPENAI_API_KEY", "");
+    let openai_vision_model = env_or("OPENAI_VISION_MODEL", "k3-256k");
+    let openai_llm_model = env_or("OPENAI_LLM_MODEL", "k3-256k");
 
     println!("video: {}", video.display());
-    println!("ollama: {ollama_url} | vision: {vision_model} | llm: {llm_model}");
-    println!("whisper: {python} {script} ({whisper_model})");
+    println!("vision provider: {vision_provider} | llm provider: {llm_provider}");
 
-    let vision_client = AiClient::new(ollama_url.clone()).expect("ai client");
-    let llm_client = AiClient::new(ollama_url).expect("ai client");
+    let vision: Arc<dyn Vision> = if vision_provider == "openai" {
+        Arc::new(OpenAiVision {
+            client: OpenAiClient::new(&openai_base_url, &openai_api_key).expect("vision client"),
+            model: openai_vision_model,
+        })
+    } else {
+        Arc::new(OllamaVision {
+            client: AiClient::new(ollama_url.clone()).expect("ai client"),
+            model: vision_model,
+        })
+    };
+    let llm: Arc<dyn Llm> = if llm_provider == "openai" {
+        Arc::new(OpenAiLlm {
+            client: OpenAiClient::new(&openai_base_url, &openai_api_key).expect("llm client"),
+            model: openai_llm_model,
+        })
+    } else {
+        Arc::new(OllamaLlm {
+            client: AiClient::new(ollama_url).expect("ai client"),
+            model: llm_model,
+        })
+    };
     let pipeline = AnalysisPipeline::new(
         Arc::new(FfmpegFrameExtractor),
         Arc::new(WhisperAsr::new(script, whisper_model).with_python(python)),
-        Arc::new(OllamaVision {
-            client: vision_client,
-            model: vision_model,
-        }),
-        Arc::new(OllamaLlm {
-            client: llm_client,
-            model: llm_model,
-        }),
+        vision,
+        llm,
     );
 
     let work = std::env::temp_dir().join(format!("e2e_analysis_{}", std::process::id()));
