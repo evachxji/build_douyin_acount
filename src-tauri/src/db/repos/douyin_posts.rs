@@ -120,6 +120,18 @@ impl<'a> DouyinPostsRepo<'a> {
         Ok(n)
     }
 
+    /// 导出清单数据源：仅已发布 + 定时待发布作品，按创建时间倒序。
+    pub fn list_for_export(&self) -> Result<Vec<DouyinPost>, DomainError> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {POST_COLS} FROM douyin_posts
+             WHERE status IN ('published','scheduled')
+             ORDER BY create_time DESC"
+        ))?;
+        let rows = stmt.query_map([], row_to_post)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// 已存有违规原因（brief）的作品 aweme_id 列表——同步时传给 sidecar 跳过详情补抓。
     pub fn list_violation_brief_ids(&self) -> Result<Vec<String>, DomainError> {
         let conn = self.db.conn();

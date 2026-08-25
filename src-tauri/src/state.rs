@@ -115,8 +115,12 @@ impl AppState {
             douyin_sync_script.clone(),
         )));
         runtime.register(Box::new(crate::agents::douyin_moderate::DouyinModerateAgent::new(
-            node_bin,
+            node_bin.clone(),
             douyin_sync_script.with_file_name("moderate.js"),
+        )));
+        runtime.register(Box::new(crate::agents::douyin_export::DouyinExportAgent::new(
+            node_bin,
+            douyin_sync_script,
         )));
         let (ollama_url, llm_model) = {
             let s = self.settings.read().expect("settings lock poisoned");

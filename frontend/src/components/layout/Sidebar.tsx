@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
-import type { FilterState } from "../../api/types";
+import type { AgentTask, FilterState } from "../../api/types";
 import { api } from "../../api/client";
 import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
@@ -29,6 +29,73 @@ export function Sidebar({ width }: { width: number }) {
   const filter = useAssetsStore((s) => s.filter);
   const setFilter = useAssetsStore((s) => s.setFilter);
   const [busy, setBusy] = useState<"import" | "export" | null>(null);
+  // 数据导出：记录待跟踪的导出任务 id，完成后触发保存对话框。
+  const exportTaskRef = useRef<number | null>(null);
+  const tasks = useTaskStore((s) => s.tasks);
+
+  const exportFileName = () => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `douyin-data-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.xlsx`;
+  };
+
+  const handleExportReady = async (task: AgentTask) => {
+    const filePath = task.payload?.file_path;
+    if (typeof filePath !== "string" || !filePath) {
+      await message("导出完成但未找到生成的文件。", { title: "数据导出", kind: "error" });
+      return;
+    }
+    const dest = await save({
+      title: "保存抖音作品数据清单",
+      defaultPath: exportFileName(),
+      filters: [{ name: "Excel 工作簿", extensions: ["xlsx"] }],
+    });
+    if (!dest) return;
+    try {
+      await api.saveExportFile(filePath, dest);
+      const rows = task.payload?.rows ?? 0;
+      const images = task.payload?.images ?? 0;
+      await message(`已导出 ${rows} 条作品数据（含 ${images} 张封面）。`, {
+        title: "数据导出",
+      });
+    } catch (e) {
+      await message(e instanceof Error ? e.message : String(e), {
+        title: "数据导出",
+        kind: "error",
+      });
+    }
+  };
+
+  // 跟随任务面板轮询，监听导出任务终态。
+  useEffect(() => {
+    const id = exportTaskRef.current;
+    if (id == null) return;
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    if (task.status === "SUCCEEDED") {
+      exportTaskRef.current = null;
+      void handleExportReady(task);
+    } else if (task.status === "FAILED" || task.status === "CANCELLED") {
+      exportTaskRef.current = null;
+      void message(task.error ?? "导出任务已结束。", { title: "数据导出", kind: "error" });
+    }
+  }, [tasks]);
+
+  const handleExportData = async () => {
+    if (exportTaskRef.current != null) return;
+    try {
+      const id = await api.startDouyinExport();
+      exportTaskRef.current = id;
+      await message("已开始拉取抖音作品数据并生成 Excel，完成后将弹出保存位置。", {
+        title: "数据导出",
+      });
+    } catch (e) {
+      await message(e instanceof Error ? e.message : String(e), {
+        title: "数据导出",
+        kind: "error",
+      });
+    }
+  };
 
   // 状态分类切换后默认聚焦新列表第一个视频（列表为空则不跳转）。
   const applyFilter = async (patch: Partial<FilterState>) => {
@@ -160,6 +227,13 @@ export function Sidebar({ width }: { width: number }) {
         })}
       </div>
       <div className="flex justify-end gap-2 border-t border-line px-3 py-2">
+        <button
+          onClick={() => void handleExportData()}
+          className="h-7 rounded bg-accent px-2.5 text-xs font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          title="从抖音创作者平台拉取全部已发布（含定时待发布）作品数据，导出为 Excel 清单"
+        >
+          数据导出
+        </button>
         <button
           onClick={() => void handleImport()}
           disabled={busy !== null}

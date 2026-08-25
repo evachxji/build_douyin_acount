@@ -2,6 +2,7 @@ pub mod filter;
 pub mod collector;
 pub mod content;
 pub mod douyin_moderate;
+pub mod douyin_export;
 pub mod douyin_sync;
 pub mod publisher;
 pub mod runtime;

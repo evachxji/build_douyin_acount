@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde_json::json;
 use tauri::State;
 
@@ -97,6 +99,37 @@ pub fn moderate_all_violations(state: State<AppState>) -> Result<i64, ApiError> 
             false,
         )
         .map_err(ApiError::from)
+}
+
+/// 发起一轮「数据导出」：拉取全部已发布（含定时待发布）作品详细数据并生成 Excel。
+/// 防并发：与同步共用浏览器会话，已有同步/导出任务时拒绝重复发起。
+#[tauri::command]
+pub fn start_douyin_export(state: State<AppState>) -> Result<i64, ApiError> {
+    let repo = TasksRepo::new(&state.db);
+    if repo.has_active("douyin_sync")? || repo.has_active("douyin_export")? {
+        return Err(DomainError::InvalidData(
+            "已有同步或导出任务在进行或排队中，请先等待完成或取消。".to_string(),
+        )
+        .into());
+    }
+    repo.enqueue("douyin_export", "export_works", json!({}), false)
+        .map_err(ApiError::from)
+}
+
+/// 把已生成的导出 Excel 复制到用户选择的保存位置。
+/// 仅允许复制 exports 目录内由本应用生成的文件。
+#[tauri::command]
+pub fn save_export_file(state: State<AppState>, src: String, dest: String) -> Result<(), ApiError> {
+    let src_path = Path::new(&src);
+    let exports_root = state.store.root().join("exports");
+    if !src_path.starts_with(&exports_root) {
+        return Err(DomainError::InvalidData("非法导出文件路径".to_string()).into());
+    }
+    if !src_path.is_file() {
+        return Err(DomainError::InvalidData("导出文件不存在或已被清理".to_string()).into());
+    }
+    std::fs::copy(src_path, Path::new(&dest)).map_err(DomainError::from)?;
+    Ok(())
 }
 
 /// 在系统默认浏览器打开 URL（作品详情页/定时编辑页）。

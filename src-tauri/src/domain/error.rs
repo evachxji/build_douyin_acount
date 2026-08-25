@@ -21,6 +21,8 @@ pub enum DomainError {
     Process { cmd: String, detail: String },
     #[error("http request failed: status={status}, body={body}")]
     Http { status: u16, body: String },
+    #[error("xlsx error: {0}")]
+    Xlsx(#[from] rust_xlsxwriter::XlsxError),
 }
 
 /// 可序列化的错误响应（供 Tauri 命令返回给前端）。

@@ -38,7 +38,7 @@ export const useTaskStore = create<TasksState>((set, get) => ({
       // 同步/违规处理任务终态时刷新发布日历数据。
       const syncTerminal = tasks.some(
         (t) =>
-          (t.agent_name === "douyin_sync" || t.agent_name === "douyin_moderate") &&
+          (t.agent_name === "douyin_sync" || t.agent_name === "douyin_moderate" || t.agent_name === "douyin_export") &&
           terminal.includes(t.status) &&
           prev.some((p) => p.id === t.id && !terminal.includes(p.status)),
       );

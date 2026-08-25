@@ -31,7 +31,7 @@ impl DouyinSyncAgent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum SyncState {
+pub(crate) enum SyncState {
     Running,
     Done,
     Cancelled,
@@ -39,7 +39,7 @@ enum SyncState {
     Missing,
 }
 
-fn read_progress(path: &Path) -> Result<SyncState, DomainError> {
+pub(crate) fn read_progress(path: &Path) -> Result<SyncState, DomainError> {
     let raw = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SyncState::Missing),
@@ -57,19 +57,19 @@ fn read_progress(path: &Path) -> Result<SyncState, DomainError> {
     })
 }
 
-fn sync_dir(store: &MediaStore, task_id: i64) -> PathBuf {
+pub(crate) fn sync_dir(store: &MediaStore, task_id: i64) -> PathBuf {
     store.root().join("douyin_sync").join(task_id.to_string())
 }
 
-fn progress_path(store: &MediaStore, task_id: i64) -> PathBuf {
+pub(crate) fn progress_path(store: &MediaStore, task_id: i64) -> PathBuf {
     sync_dir(store, task_id).join("progress.json")
 }
 
-fn posts_path(store: &MediaStore, task_id: i64) -> PathBuf {
+pub(crate) fn posts_path(store: &MediaStore, task_id: i64) -> PathBuf {
     sync_dir(store, task_id).join("posts.jsonl")
 }
 
-fn cancel_path(store: &MediaStore, task_id: i64) -> PathBuf {
+pub(crate) fn cancel_path(store: &MediaStore, task_id: i64) -> PathBuf {
     store.root().join("douyin_sync").join("cancel").join(task_id.to_string())
 }
 
@@ -83,10 +83,11 @@ pub fn request_cancel(store: &MediaStore, task_id: i64) -> Result<(), DomainErro
     Ok(())
 }
 
-fn spawn_sidecar(
+pub(crate) fn spawn_sidecar(
     ctx: &AgentContext,
     task: &AgentTask,
-    self_agent: &DouyinSyncAgent,
+    node: &str,
+    script: &Path,
 ) -> Result<(), DomainError> {
     let dir = sync_dir(&ctx.store, task.id);
     std::fs::create_dir_all(dir.join("jobs"))?;
@@ -114,15 +115,15 @@ fn spawn_sidecar(
             "message": "启动同步 sidecar",
         }))?,
     )?;
-    Command::new(&self_agent.node)
-        .arg(&self_agent.script)
+    Command::new(node)
+        .arg(script)
         .arg(&job_path)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
         .map_err(|e| DomainError::Process {
-            cmd: self_agent.node.clone(),
+            cmd: node.to_string(),
             detail: format!("spawn douyin sync sidecar failed: {e}"),
         })
 }
@@ -143,7 +144,7 @@ fn fail_task(store: &MediaStore, task: &AgentTask, msg: String) -> DomainError {
 
 /// 把 sidecar 已写出的 posts.jsonl 逐行 upsert 进 douyin_posts（幂等，整文件重读
 /// 也只会刷新统计）；返回（总行数，定时数，违规数）。
-fn import_new_posts(ctx: &AgentContext, task_id: i64) -> Result<(i64, i64, i64), DomainError> {
+pub(crate) fn import_new_posts(ctx: &AgentContext, task_id: i64) -> Result<(i64, i64, i64), DomainError> {
     let pp = posts_path(&ctx.store, task_id);
     let raw = match std::fs::read_to_string(&pp) {
         Ok(s) => s,
@@ -187,7 +188,7 @@ impl Agent for DouyinSyncAgent {
         let progress_file = progress_path(&ctx.store, task.id);
         let mut state = read_progress(&progress_file)?;
         if state == SyncState::Missing {
-            spawn_sidecar(ctx, &task, self)?;
+            spawn_sidecar(ctx, &task, &self.node, &self.script)?;
             return Ok(AgentOutcome::Continue);
         }
         // 活性检查：sidecar 每 5s 心跳 touch 一次 progress.json；
