@@ -233,6 +233,30 @@ impl<'a> TasksRepo<'a> {
         self.transition(id, TaskStatus::Cancelled)
     }
 
+    /// 取消某资产所有排队中/进行中的分析（vision）任务（手工淘汰时级联调用）。
+    /// 返回取消的任务数。RUNNING 任务的 worker 线程无法硬中断，但跑完后会被
+    /// vision 的「手工淘汰」复查拦住（不复活素材），且终态写回被状态机拒绝
+    /// （CANCELLED 是终态，不可再迁移），状态保持 CANCELLED。
+    pub fn cancel_active_analysis_for_asset(&self, asset_id: i64) -> Result<usize, DomainError> {
+        // 锁作用域收窄：查询后立即释放，避免与 cancel 内部的加锁死锁（同 enqueue_analysis）。
+        let ids: Vec<i64> = {
+            let conn = self.db.conn();
+            let mut stmt = conn.prepare(
+                "SELECT id FROM agent_tasks
+                 WHERE agent_name = 'vision'
+                   AND status IN ('PENDING','RUNNING')
+                   AND json_extract(payload_json, '$.asset_id') = ?1",
+            )?;
+            let rows = stmt.query_map([asset_id], |r| r.get::<_, i64>(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let n = ids.len();
+        for id in ids {
+            self.cancel(id)?;
+        }
+        Ok(n)
+    }
+
     /// 失败处理：未超过最大次数则排入重试（指数退避），否则置 FAILED。
     pub fn fail(&self, id: i64, error: &str) -> Result<(), DomainError> {
         let task = self.get(id)?.ok_or(DomainError::InvalidData(format!("task {id} not found")))?;

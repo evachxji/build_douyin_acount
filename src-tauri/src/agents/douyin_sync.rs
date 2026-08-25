@@ -163,6 +163,10 @@ fn import_new_posts(ctx: &AgentContext, task_id: i64) -> Result<(i64, i64, i64),
             }
         };
         repo.upsert(&post)?;
+        // 真实行入库后清理同标题同日的发布占位行（local-draft-*，publisher 登记的回退产物）。
+        if let Some(t) = &post.title {
+            repo.delete_local_placeholders(t, post.create_time)?;
+        }
         total += 1;
         if post.status == "scheduled" {
             scheduled += 1;
@@ -227,6 +231,25 @@ impl Agent for DouyinSyncAgent {
                 let dir = sync_dir(&ctx.store, task.id);
                 if dir.is_dir() {
                     let _ = std::fs::remove_dir_all(&dir);
+                }
+                // 自动巡检联动：仅调度器发起的轮次（source=auto）且开关仍开启时，
+                // 仍有未处理违规作品则自动入队违规处理（与手动「处理所有违规视频」
+                // 同一逻辑：设私密 + 今天发布的触发最晚定时改立即发布）。
+                // 手动 sync（无 source）不触发；moderate 完成后自动入队的刷新 sync
+                // 也无 source，链路不成环。
+                if task.payload["source"].as_str() == Some("auto")
+                    && crate::settings::SettingsRepo::new(ctx.db).get_auto_sync_moderate()?
+                {
+                    let repo = DouyinPostsRepo::new(ctx.db);
+                    let tasks = crate::db::repos::tasks::TasksRepo::new(ctx.db);
+                    if !repo.list_violating()?.is_empty() && !tasks.has_active("douyin_moderate")? {
+                        tasks.enqueue(
+                            "douyin_moderate",
+                            "moderate_violation",
+                            json!({"mode": "all", "source": "auto"}),
+                            false,
+                        )?;
+                    }
                 }
                 Ok(AgentOutcome::Succeeded(json!({
                     "synced": synced,

@@ -16,9 +16,9 @@ use build_douyin_acount_lib::domain::douyin::NewDouyinPost;
 use build_douyin_acount_lib::domain::draft::{DraftStatus, NewDraft};
 use build_douyin_acount_lib::domain::task::TaskStatus;
 use build_douyin_acount_lib::media::MediaStore;
-use chrono::{NaiveDate, NaiveDateTime, Timelike};
+use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone, Timelike};
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -128,6 +128,28 @@ fn write_progress(env: &TestEnv, state: &str, message: &str) {
     .expect("write progress");
 }
 
+/// 带发布捕获信息的 published 进度（模拟 sidecar 钩子捕获到页面实际值）。
+fn write_published_with_post(env: &TestEnv, post: serde_json::Value) {
+    let path = progress_path(env);
+    std::fs::create_dir_all(path.parent().unwrap()).expect("dirs");
+    std::fs::write(
+        path,
+        serde_json::to_string(&json!({
+            "state": "published",
+            "message": "页面已跳转到内容管理，发布已提交",
+            "post": post,
+        }))
+        .unwrap(),
+    )
+    .expect("write progress");
+}
+
+/// "YYYY-MM-DD HH:MM"（本地时间）→ epoch 秒（与被测代码同口径）。
+fn local_ts(s: &str) -> i64 {
+    let ndt = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").expect("parse");
+    Local.from_local_datetime(&ndt).single().expect("local").timestamp()
+}
+
 #[test]
 fn publisher_file_stage_keeps_task_running_with_info_payload() {
     let env = setup();
@@ -213,12 +235,34 @@ fn publisher_finalizes_when_human_confirms_publish() {
     assert_eq!(draft.status, DraftStatus::Published);
     let asset = AssetsRepo::new(&env.db).get(env.asset_id).expect("get").expect("asset");
     assert_eq!(asset.status, AssetStatus::Published);
+    // 人工确认路径无 sidecar 捕获：兜底登记（local-draft 占位 id + draft 标题 + 立即发布），
+    // 日历即时更新；不再入队 douyin_sync。
+    let post = DouyinPostsRepo::new(&env.db)
+        .get_by_aweme(&format!("local-draft-{}", env.draft_id))
+        .expect("get post")
+        .expect("发布完成后应直接登记日历");
+    assert_eq!(post.title.as_deref(), Some("测试标题"));
+    assert_eq!(post.status, "published");
+    assert!(post.public_time > 0);
+    let sync = TasksRepo::new(&env.db)
+        .claim_next("douyin_sync")
+        .expect("claim sync");
+    assert!(sync.is_none(), "直接登记日历，不再入队 douyin_sync");
 }
 
 #[test]
 fn publisher_finalizes_when_sidecar_detects_success() {
     let env = setup();
-    write_progress(&env, "published", "detected publish toast");
+    // sidecar 钩子捕获到页面实际值（用户手改过的标题与定时时间），随 published 上报。
+    write_published_with_post(
+        &env,
+        json!({
+            "awemeId": "767123000",
+            "title": "页面上的标题",
+            "scheduleTime": "2100-01-02 10:30",
+            "coverPath": "",
+        }),
+    );
     let ctx = AgentContext {
         db: &env.db,
         store: env.store.clone(),
@@ -228,6 +272,49 @@ fn publisher_finalizes_when_sidecar_detects_success() {
     assert!(matches!(outcome, AgentOutcome::Succeeded(_)));
     let asset = AssetsRepo::new(&env.db).get(env.asset_id).expect("get").expect("asset");
     assert_eq!(asset.status, AssetStatus::Published);
+    // 日历登记以捕获的页面实际值为准：真实 aweme_id + 手改标题 + 定时作品（未来时间）。
+    let post = DouyinPostsRepo::new(&env.db)
+        .get_by_aweme("767123000")
+        .expect("get post")
+        .expect("发布完成后应直接登记日历");
+    assert_eq!(post.title.as_deref(), Some("页面上的标题"));
+    assert_eq!(post.status, "scheduled");
+    assert_eq!(post.create_time, local_ts("2100-01-02 10:30"));
+    assert_eq!(post.public_time, 0);
+    // 直接登记，不再入队 douyin_sync。
+    let sync = TasksRepo::new(&env.db)
+        .claim_next("douyin_sync")
+        .expect("claim sync");
+    assert!(sync.is_none(), "直接登记日历，不再入队 douyin_sync");
+}
+
+#[test]
+fn publisher_registers_past_schedule_time_as_published() {
+    // 定时时间已过（提交后停留太久才判定完成）按已发布登记，日历落在原定时时刻。
+    let env = setup();
+    write_published_with_post(
+        &env,
+        json!({
+            "awemeId": "767456000",
+            "title": "旧定时",
+            "scheduleTime": "2020-01-02 10:30",
+            "coverPath": "",
+        }),
+    );
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Succeeded(_)));
+    let post = DouyinPostsRepo::new(&env.db)
+        .get_by_aweme("767456000")
+        .expect("get post")
+        .expect("应登记日历");
+    assert_eq!(post.status, "published");
+    assert_eq!(post.create_time, local_ts("2020-01-02 10:30"));
+    assert_eq!(post.public_time, local_ts("2020-01-02 10:30"));
 }
 
 #[test]
@@ -350,8 +437,24 @@ fn at(m: u32, d: u32, h: u32, min: u32, s: u32) -> NaiveDateTime {
     day(m, d).and_hms_opt(h, min, s).unwrap()
 }
 
-fn occupied(days: &[NaiveDate]) -> HashSet<NaiveDate> {
-    days.iter().copied().collect()
+/// 占用日夹具：指定日期各排 1 个 10:00 视频（第一遍场景不关心时刻）。
+fn occupied(days: &[NaiveDate]) -> HashMap<NaiveDate, Vec<i64>> {
+    days.iter().map(|&d| (d, vec![10 * 60])).collect()
+}
+
+/// 14 天覆盖夹具：每天排 base 时刻列表，overrides 按 offset 覆盖（空 vec = 空缺日）。
+fn full_days(
+    today: NaiveDate,
+    base: &[i64],
+    overrides: &[(i64, Vec<i64>)],
+) -> HashMap<NaiveDate, Vec<i64>> {
+    let mut map: HashMap<NaiveDate, Vec<i64>> = (0..14)
+        .map(|i| (today + chrono::Duration::days(i), base.to_vec()))
+        .collect();
+    for (off, mins) in overrides {
+        map.insert(today + chrono::Duration::days(*off), mins.clone());
+    }
+    map
 }
 
 /// 分钟数（当天 0 点起）。
@@ -373,12 +476,12 @@ fn schedule_picks_nearest_free_day_skipping_occupied() {
 fn schedule_today_when_window_available() {
     // 今天无视频且窗口可用：不早于 max(08:00, now+2h)。
     let now = at(8, 21, 6, 0, 0); // now+2h=08:00，窗口 [08:00, 19:00)
-    let t = pick_schedule_time(&HashSet::new(), now, 0).expect("今天可排");
+    let t = pick_schedule_time(&HashMap::new(), now, 0).expect("今天可排");
     assert_eq!(t.date(), day(8, 21));
     assert_eq!(minutes(t), 8 * 60, "rand=0 取下界 08:00");
 
     let now = at(8, 21, 14, 30, 0); // now+2h=16:30
-    let t = pick_schedule_time(&HashSet::new(), now, 0).expect("今天仍可排");
+    let t = pick_schedule_time(&HashMap::new(), now, 0).expect("今天仍可排");
     assert_eq!(t.date(), day(8, 21));
     assert_eq!(minutes(t), 16 * 60 + 30);
 }
@@ -387,7 +490,7 @@ fn schedule_today_when_window_available() {
 fn schedule_today_rounds_up_seconds_to_next_minute() {
     // now+2h 带秒 -> 向上取整到下一分钟（抖音限制不早于 2 小时后）。
     let now = at(8, 21, 10, 0, 30); // earliest = 12:00:30 -> 12:01
-    let t = pick_schedule_time(&HashSet::new(), now, 0).expect("今天可排");
+    let t = pick_schedule_time(&HashMap::new(), now, 0).expect("今天可排");
     assert_eq!(minutes(t), 12 * 60 + 1);
 }
 
@@ -395,7 +498,7 @@ fn schedule_today_rounds_up_seconds_to_next_minute() {
 fn schedule_skips_today_when_window_gone() {
     // 17:00 之后 now+2h >= 19:00，今天窗口为空 -> 明天。
     let now = at(8, 21, 17, 0, 0);
-    let t = pick_schedule_time(&HashSet::new(), now, 0).expect("明天可排");
+    let t = pick_schedule_time(&HashMap::new(), now, 0).expect("明天可排");
     assert_eq!(t.date(), day(8, 22));
     assert!((8 * 60..19 * 60).contains(&minutes(t)));
 }
@@ -409,18 +512,127 @@ fn schedule_crosses_month_boundary() {
 }
 
 #[test]
-fn schedule_none_when_14_days_all_occupied() {
-    let now = at(8, 21, 10, 0, 0);
-    let occ: HashSet<NaiveDate> = (0..14).map(|i| day(8, 21) + chrono::Duration::days(i)).collect();
-    assert_eq!(pick_schedule_time(&occ, now, 0), None);
+fn schedule_skips_today_when_2h_window_crosses_midnight() {
+    // 23:00 发起：now+2h 已是明天 01:00，今天任何时刻都违反「2 小时后」-> 明天。
+    let now = at(8, 21, 23, 0, 0);
+    let t = pick_schedule_time(&HashMap::new(), now, 0).expect("明天可排");
+    assert_eq!(t.date(), day(8, 22));
 }
 
 #[test]
 fn schedule_random_spreads_within_window() {
     // rand_nanos 映射进窗口：取 span-1 时应落在 19:00 前一分钟内。
     let now = at(8, 21, 6, 0, 0); // 窗口 [08:00, 19:00) span=660
-    let t = pick_schedule_time(&HashSet::new(), now, 659).expect("今天可排");
+    let t = pick_schedule_time(&HashMap::new(), now, 659).expect("今天可排");
     assert_eq!(minutes(t), 18 * 60 + 59);
+}
+
+#[test]
+fn schedule_pass1_empty_day_beats_pass2() {
+    // 层级严格：今天已有 1 个、明天空缺 -> 第一遍优先，选明天而非今天补下午。
+    let now = at(8, 21, 6, 0, 0);
+    let map = full_days(now.date(), &[10 * 60], &[(1, vec![])]);
+    let t = pick_schedule_time(&map, now, 0).expect("明天空缺可排");
+    assert_eq!(t.date(), day(8, 22));
+    assert_eq!(minutes(t), 8 * 60);
+}
+
+#[test]
+fn schedule_pass2_fills_afternoon_when_all_days_have_one() {
+    // 14 天各有 1 个 10:00（上午）-> 第二遍：今天补下午，rand=0 取段开 12:00。
+    let now = at(8, 21, 6, 0, 0);
+    let map = full_days(now.date(), &[10 * 60], &[]);
+    let t = pick_schedule_time(&map, now, 0).expect("第二遍可排");
+    assert_eq!(t.date(), day(8, 21));
+    assert_eq!(minutes(t), 12 * 60);
+}
+
+#[test]
+fn schedule_pass2_afternoon_existing_picks_morning() {
+    // 已有 14:00（下午）-> 互补排上午，rand=0 取段开 08:00。
+    let now = at(8, 21, 6, 0, 0);
+    let map = full_days(now.date(), &[14 * 60], &[]);
+    let t = pick_schedule_time(&map, now, 0).expect("第二遍可排");
+    assert_eq!(t.date(), day(8, 21));
+    assert_eq!(minutes(t), 8 * 60);
+}
+
+#[test]
+fn schedule_pass2_evening_existing_picks_morning() {
+    // 已有 20:00（晚上）-> 顺序第一个空闲段为上午（互补规则的自然延伸）。
+    let now = at(8, 21, 6, 0, 0);
+    let map = full_days(now.date(), &[20 * 60], &[]);
+    let t = pick_schedule_time(&map, now, 0).expect("第二遍可排");
+    assert_eq!(t.date(), day(8, 21));
+    assert_eq!(minutes(t), 8 * 60);
+}
+
+#[test]
+fn schedule_pass2_today_afternoon_gone_falls_back_to_evening() {
+    // 今天 17:30 发起（earliest=19:30），已有 10:00：下午窗口不足 -> 晚上 [19:30, 22:00)。
+    let now = at(8, 21, 17, 30, 0);
+    let map = full_days(now.date(), &[10 * 60], &[]);
+    let t = pick_schedule_time(&map, now, 0).expect("回退晚上可排");
+    assert_eq!(t.date(), day(8, 21));
+    assert_eq!(minutes(t), 19 * 60 + 30, "rand=0 取 earliest 19:30");
+}
+
+#[test]
+fn schedule_pass2_today_morning_gone_falls_back_to_evening() {
+    // 今天 11:00 发起（earliest=13:00），已有 14:00：上午已过 -> 晚上 [19:00, 22:00)。
+    let now = at(8, 21, 11, 0, 0);
+    let map = full_days(now.date(), &[14 * 60], &[]);
+    let t = pick_schedule_time(&map, now, 0).expect("回退晚上可排");
+    assert_eq!(t.date(), day(8, 21));
+    assert_eq!(minutes(t), 19 * 60);
+}
+
+#[test]
+fn schedule_pass2_skips_today_when_all_slots_gone() {
+    // 今天 20:30 发起（earliest=22:30），三段都不足 -> 跳过今天，明天补下午。
+    let now = at(8, 21, 20, 30, 0);
+    let map = full_days(now.date(), &[10 * 60], &[]);
+    let t = pick_schedule_time(&map, now, 0).expect("明天可排");
+    assert_eq!(t.date(), day(8, 22));
+    assert_eq!(minutes(t), 12 * 60);
+}
+
+#[test]
+fn schedule_pass2_nearest_day_with_exactly_one() {
+    // 今天已 2 个、明天恰 1 个 -> 第二遍选明天（不是更近但已 2 个的今天）。
+    let now = at(8, 21, 6, 0, 0);
+    let map = full_days(now.date(), &[10 * 60], &[(0, vec![10 * 60, 14 * 60])]);
+    let t = pick_schedule_time(&map, now, 0).expect("明天补第二遍");
+    assert_eq!(t.date(), day(8, 22));
+    assert_eq!(minutes(t), 12 * 60);
+}
+
+#[test]
+fn schedule_pass3_fills_missing_slot() {
+    // 14 天各有 2 个（10:00+14:00，上午+下午）-> 第三遍：今天补晚上 19:00。
+    let now = at(8, 21, 6, 0, 0);
+    let map = full_days(now.date(), &[10 * 60, 14 * 60], &[]);
+    let t = pick_schedule_time(&map, now, 0).expect("第三遍可排");
+    assert_eq!(t.date(), day(8, 21));
+    assert_eq!(minutes(t), 19 * 60);
+}
+
+#[test]
+fn schedule_pass3_same_slot_collision_picks_first_free() {
+    // 今天 09:00+10:00 撞在上午（手动排的）-> 补顺序第一个空闲段（下午）。
+    let now = at(8, 21, 6, 0, 0);
+    let map = full_days(now.date(), &[10 * 60, 14 * 60], &[(0, vec![9 * 60, 10 * 60])]);
+    let t = pick_schedule_time(&map, now, 0).expect("第三遍可排");
+    assert_eq!(t.date(), day(8, 21));
+    assert_eq!(minutes(t), 12 * 60);
+}
+
+#[test]
+fn schedule_none_when_14_days_all_have_three() {
+    // 14 天 × 3 个全满 -> None（sidecar 提示人工选择）。
+    let now = at(8, 21, 10, 0, 0);
+    let map = full_days(now.date(), &[10 * 60, 14 * 60, 20 * 60], &[]);
+    assert_eq!(pick_schedule_time(&map, now, 0), None);
 }
 
 #[test]

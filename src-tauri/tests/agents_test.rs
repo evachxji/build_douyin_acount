@@ -579,3 +579,38 @@ fn filter_agent_standalone_updates_status_from_db() {
     let asset = AssetsRepo::new(&db).get(asset_id).expect("get").expect("some");
     assert_eq!(asset.status, AssetStatus::Eliminated);
 }
+
+#[test]
+fn cancel_active_analysis_for_asset_cancels_pending_and_running() {
+    // 手工淘汰级联：目标资产的 PENDING 与 RUNNING 分析任务都被取消；
+    // 其他资产、其他 agent、已终态的任务不受影响。
+    let (_dir, db, _store) = setup();
+    let tasks = TasksRepo::new(&db);
+    let t1 = tasks
+        .enqueue("vision", "analyze", serde_json::json!({"asset_id": 1}), false)
+        .expect("enqueue");
+    let t2 = tasks
+        .enqueue("vision", "analyze", serde_json::json!({"asset_id": 1}), false)
+        .expect("enqueue");
+    let claimed = tasks.claim_next("vision").expect("claim").expect("some task");
+    assert_eq!(claimed.id, t1, "先进先出，t1 进入 RUNNING");
+    let t3 = tasks
+        .enqueue("vision", "analyze", serde_json::json!({"asset_id": 2}), false)
+        .expect("enqueue");
+    let t4 = tasks
+        .enqueue("collector", "collect", serde_json::json!({"asset_id": 1}), false)
+        .expect("enqueue");
+    let t5 = tasks
+        .enqueue("vision", "analyze", serde_json::json!({"asset_id": 1}), false)
+        .expect("enqueue");
+    tasks.cancel(t5).expect("cancel t5");
+
+    let n = tasks.cancel_active_analysis_for_asset(1).expect("cancel active");
+    assert_eq!(n, 2, "只取消 PENDING + RUNNING 两个");
+    let status_of = |id: i64| tasks.get(id).expect("get").expect("some task").status;
+    assert_eq!(status_of(t1), TaskStatus::Cancelled);
+    assert_eq!(status_of(t2), TaskStatus::Cancelled);
+    assert_eq!(status_of(t3), TaskStatus::Pending, "其他资产不动");
+    assert_eq!(status_of(t4), TaskStatus::Pending, "其他 agent 不动");
+    assert_eq!(status_of(t5), TaskStatus::Cancelled, "已终态的保持");
+}

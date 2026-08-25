@@ -137,7 +137,7 @@ export function ApprovalDialog() {
                 )}
                 {isPub && (
                   <p className="mt-2 rounded border border-accent/25 bg-accent/5 p-2 text-xs leading-relaxed text-paper/85">
-                    提醒：封面、发布时间（定时）需在抖音页面手动配置，程序不会代为设置。
+                    提醒：封面与定时发布时间已自动配置（失败会单独提示），请核对。发布成功后程序会自动确认并登记日历，【我已发布】仅在未自动确认时作兜底。
                   </p>
                 )}
                 {t.error && <p className="mt-1 text-xs text-bad">{t.error}</p>}

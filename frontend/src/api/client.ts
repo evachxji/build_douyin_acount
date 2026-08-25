@@ -80,6 +80,9 @@ export const api = {
     call<{ platform: string; count: number; task_id: number }[]>("start_collection"),
   startDouyinSync: () => call<number>("start_douyin_sync"),
   listDouyinPosts: () => call<DouyinPost[]>("list_douyin_posts"),
+  getAutoSyncModerate: () => call<boolean>("get_auto_sync_moderate"),
+  setAutoSyncModerate: (enabled: boolean) =>
+    call<void>("set_auto_sync_moderate", { enabled }),
   moderateDouyinViolation: (awemeId: string) =>
     call<number>("moderate_douyin_violation", { awemeId }),
   moderateAllViolations: () => call<number>("moderate_all_violations"),

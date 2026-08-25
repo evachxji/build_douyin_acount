@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod agents;
+pub mod auto_sync;
 pub mod backup;
 pub mod commands;
 pub mod db;
@@ -58,6 +59,15 @@ fn app_info() -> serde_json::Value {
     })
 }
 
+/// 显示并聚焦主窗口（托盘左键/「显示窗口」菜单/二次启动时调用）。
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let store = MediaStore::new(storage_root());
@@ -72,6 +82,11 @@ pub fn run() {
     let state = AppState::new(db, store, settings);
 
     tauri::Builder::default()
+        // 单实例必须最先注册：托盘常驻后用户可能再次双击图标——拦截二次启动，
+        // 改为显示已有窗口（双开会争用 SQLite 与 opencli 浏览器会话）。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -91,6 +106,8 @@ pub fn run() {
             commands::collection::start_collection,
             commands::douyin::start_douyin_sync,
             commands::douyin::list_douyin_posts,
+            commands::douyin::get_auto_sync_moderate,
+            commands::douyin::set_auto_sync_moderate,
             commands::douyin::moderate_douyin_violation,
             commands::douyin::moderate_all_violations,
             commands::douyin::open_url,
@@ -111,6 +128,32 @@ pub fn run() {
             commands::ollama::start_ollama,
         ])
         .setup(|app| {
+            // 系统托盘：关窗仅隐藏到托盘，后台任务（分析/发布/巡检）继续运行；
+            // 仅托盘菜单【退出】真正结束进程。左键单击托盘图标恢复窗口。
+            let show = tauri::menu::MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
+            let quit = tauri::menu::MenuItemBuilder::with_id("quit", "退出").build(app)?;
+            let menu = tauri::menu::Menu::with_items(app, &[&show, &quit])?;
+            tauri::tray::TrayIconBuilder::with_id("main")
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?)
+                .tooltip("抖音素材运营助手")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => show_main_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
             // 后台 worker：串行消费 vision 任务队列（含失败退避重试）。
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -145,7 +188,25 @@ pub fn run() {
                     }
                 }
             });
+            // 自动巡检调度：每 60s 检查一次；开关开且距上次同步 ≥30 分钟则
+            // 入队 douyin_sync（payload 带 source=auto，完成分支联动违规处理）。
+            let handle_auto = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                let state = handle_auto.state::<AppState>();
+                if let Err(e) = auto_sync::maybe_enqueue(&state.db) {
+                    tracing::warn!("auto sync scheduler error: {e}");
+                }
+            });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // 关窗不退出：拦截关闭请求仅隐藏（托盘仍在，后台任务继续运行）。
+            // 真正退出走托盘菜单【退出】（app.exit）。
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

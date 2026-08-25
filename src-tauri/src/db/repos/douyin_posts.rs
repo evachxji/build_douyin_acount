@@ -48,6 +48,8 @@ impl<'a> DouyinPostsRepo<'a> {
     /// 按 aweme_id 幂等 upsert；本轮没下到封面时保留旧封面。
     /// 违规字段语义：status/text/url 以本轮列表为准（违规消解则清掉）；
     /// brief 来自详情接口（本轮没补抓到时保留旧值），违规消解时随 status 一并清空。
+    /// 每次 upsert 都用 datetime('now') 刷新 synced_at（与列 DEFAULT 同格式，
+    /// 前端 lastSynced 按字符串取 max 依赖全表格式统一）。
     pub fn upsert(&self, p: &NewDouyinPost) -> Result<(), DomainError> {
         let conn = self.db.conn();
         conn.execute(
@@ -76,6 +78,7 @@ impl<'a> DouyinPostsRepo<'a> {
                      ELSE COALESCE(excluded.violation_url, douyin_posts.violation_url) END,
                  create_time = excluded.create_time,
                  public_time = excluded.public_time,
+                 synced_at = datetime('now'),
                  updated_at = ?18",
             params![
                 p.aweme_id,
@@ -151,6 +154,24 @@ impl<'a> DouyinPostsRepo<'a> {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// 清理发布占位行：真实作品入库后，删除标题相同且发布日期相同的 local-draft-* 占位行
+    /// （publisher 发布登记时钩子未捕获到真实 aweme_id 的回退产物）。
+    /// 仅匹配 local- 前缀，真实行永不误删；占位行误删的代价也只是日历以真实行为准。
+    pub fn delete_local_placeholders(
+        &self,
+        title: &str,
+        create_time: i64,
+    ) -> Result<usize, DomainError> {
+        let conn = self.db.conn();
+        let n = conn.execute(
+            "DELETE FROM douyin_posts
+             WHERE aweme_id LIKE 'local-draft-%' AND title = ?1
+               AND date(create_time, 'unixepoch', 'localtime') = date(?2, 'unixepoch', 'localtime')",
+            params![title, create_time],
+        )?;
+        Ok(n)
+    }
+
     /// 定时发布中的作品（最晚的在前）。
     pub fn list_scheduled(&self) -> Result<Vec<DouyinPost>, DomainError> {
         let conn = self.db.conn();
@@ -162,23 +183,31 @@ impl<'a> DouyinPostsRepo<'a> {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// 「有公开视频」的本地日期集合（发布日历口径：私密作品不参与标记、不占位）。
-    /// 日期取 postTime（public_time > 0 优先，否则 create_time）的本地日，
+    /// 每个「有公开视频」的本地日期及其视频的时刻（当天 0 点起的分钟数，本地时区）。
+    /// 口径：postTime（public_time > 0 优先，否则 create_time）的本地日，私密作品不参与，
     /// 与前端 calendar.ts 的 groupPostsByDay/dayMarks 口径一致。
-    pub fn list_occupied_days(
+    /// 供 pick_schedule_time 统计每天视频数与上午/下午/晚上时段占用。
+    pub fn list_day_video_minutes(
         &self,
-    ) -> Result<std::collections::HashSet<chrono::NaiveDate>, DomainError> {
+    ) -> Result<Vec<(chrono::NaiveDate, i64)>, DomainError> {
         let conn = self.db.conn();
         let mut stmt = conn.prepare(
-            "SELECT DISTINCT date(
-                 CASE WHEN public_time > 0 THEN public_time ELSE create_time END,
-                 'unixepoch', 'localtime')
-             FROM douyin_posts WHERE status != 'private'",
+            "SELECT date(t, 'unixepoch', 'localtime'),
+                    CAST(strftime('%H', t, 'unixepoch', 'localtime') AS INTEGER) * 60 +
+                    CAST(strftime('%M', t, 'unixepoch', 'localtime') AS INTEGER)
+             FROM (SELECT CASE WHEN public_time > 0 THEN public_time ELSE create_time END AS t
+                   FROM douyin_posts WHERE status != 'private')",
         )?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
         Ok(rows
             .filter_map(|r| r.ok())
-            .filter_map(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+            .filter_map(|(s, m)| {
+                chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                    .ok()
+                    .map(|d| (d, m))
+            })
             .collect())
     }
 }

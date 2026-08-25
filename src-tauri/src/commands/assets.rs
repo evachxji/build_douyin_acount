@@ -69,6 +69,7 @@ pub fn delete_asset(state: State<AppState>, id: i64) -> Result<(), ApiError> {
 }
 
 /// 状态流转（合法性由状态机校验）；手工标记淘汰时记录「手工淘汰」，离开淘汰态时清除原因。
+/// 淘汰时级联取消该资产排队中/进行中的分析任务（无需再为其浪费分析资源）。
 #[tauri::command]
 pub fn update_asset_status(
     state: State<AppState>,
@@ -83,6 +84,9 @@ pub fn update_asset_status(
         None
     };
     AssetsRepo::new(&state.db).set_eliminate_reason(id, reason)?;
+    if status == AssetStatus::Eliminated {
+        crate::db::repos::tasks::TasksRepo::new(&state.db).cancel_active_analysis_for_asset(id)?;
+    }
     Ok(())
 }
 

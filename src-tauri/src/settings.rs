@@ -115,4 +115,29 @@ impl<'a> SettingsRepo<'a> {
         )?;
         Ok(())
     }
+
+    /// 自动巡检开关（独立 key，与 AppSettings JSON 分离——顶栏开关频繁读写，
+    /// 不需要触碰完整设置行）。默认关。
+    pub fn get_auto_sync_moderate(&self) -> Result<bool, DomainError> {
+        let raw: Option<String> = self
+            .db
+            .conn()
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'auto_sync_moderate'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(raw.as_deref() == Some("1"))
+    }
+
+    pub fn set_auto_sync_moderate(&self, enabled: bool) -> Result<(), DomainError> {
+        self.db.conn().execute(
+            "INSERT INTO app_settings (key, value) VALUES ('auto_sync_moderate', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                updated_at = datetime('now')",
+            [if enabled { "1" } else { "0" }],
+        )?;
+        Ok(())
+    }
 }

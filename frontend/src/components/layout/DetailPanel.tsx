@@ -422,11 +422,11 @@ export function DetailPanel() {
             {statusActionLabel}
           </button>
         )}
-        {(asset.status === "CANDIDATE" || asset.status === "SELECTED") && (
+        {["NEW", "ANALYZING", "CANDIDATE", "SELECTED"].includes(asset.status) && (
           <button
             onClick={() => void handleTransitionalStatus("ELIMINATED")}
             className="h-9 rounded border border-bad/40 px-3 text-sm text-bad hover:bg-bad/10"
-            title="标记为淘汰，不再参与发布"
+            title="标记为淘汰，不再参与发布；进行中/排队中的分析任务会一并取消"
           >
             淘汰
           </button>

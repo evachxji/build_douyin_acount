@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use chrono::{Local, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone, Timelike};
 use serde_json::json;
 
 use crate::agents::{Agent, AgentContext, AgentOutcome};
@@ -11,6 +11,7 @@ use crate::db::repos::douyin_posts::DouyinPostsRepo;
 use crate::db::repos::drafts::DraftsRepo;
 use crate::db::repos::tasks::TasksRepo;
 use crate::domain::asset::AssetStatus;
+use crate::domain::douyin::NewDouyinPost;
 use crate::domain::draft::DraftStatus;
 use crate::domain::error::DomainError;
 use crate::domain::task::AgentTask;
@@ -56,6 +57,18 @@ impl PublisherAgent {
     }
 }
 
+/// sidecar 捕获的发布提交信息（页面实际值，用户可能手改过 agent 的预设）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PostCapture {
+    /// 发布/草稿接口响应里的真实作品 id；钩子未命中时为空，登记用 local-draft-<id> 占位。
+    pub aweme_id: Option<String>,
+    pub title: Option<String>,
+    /// "YYYY-MM-DD HH:MM"（本地时间）；空 = 立即发布。
+    pub schedule_time: Option<String>,
+    /// sidecar 落盘的封面文件路径。
+    pub cover_path: Option<String>,
+}
+
 /// sidecar 进度文件状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SidecarState {
@@ -64,11 +77,31 @@ enum SidecarState {
     WaitingForFile(String),
     Uploading,
     FormFilled,
-    Published,
+    Published(Option<PostCapture>),
     BrowserClosed,
     Cancelled,
     Failed(String),
     Missing,
+}
+
+/// 解析 progress.post（sidecar 捕获的发布提交信息）；空字符串字段视为缺失。
+fn parse_post_capture(v: &serde_json::Value) -> Option<PostCapture> {
+    let p = &v["post"];
+    if !p.is_object() {
+        return None;
+    }
+    let s = |k: &str| {
+        p[k].as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+    Some(PostCapture {
+        aweme_id: s("awemeId"),
+        title: s("title"),
+        schedule_time: s("scheduleTime"),
+        cover_path: s("coverPath"),
+    })
 }
 
 fn read_progress(path: &Path) -> Result<SidecarState, DomainError> {
@@ -85,7 +118,7 @@ fn read_progress(path: &Path) -> Result<SidecarState, DomainError> {
         ),
         "uploading" => SidecarState::Uploading,
         "form_filled" => SidecarState::FormFilled,
-        "published" => SidecarState::Published,
+        "published" => SidecarState::Published(parse_post_capture(&v)),
         "browser_closed" => SidecarState::BrowserClosed,
         "cancelled" => SidecarState::Cancelled,
         "failed" => SidecarState::Failed(
@@ -144,37 +177,103 @@ pub fn request_confirm(store: &crate::media::MediaStore, draft_id: i64) -> Resul
     write_marker(store, "confirm", draft_id)
 }
 
-/// 定时发布目标时刻（本地时间）：今天起 14 天内、最近一个「没有公开视频」的日子
-/// （发布日历口径，私密作品不占位），时刻取当天 08:00~19:00 间随机分钟，且满足抖音
-/// 「2 小时后及 14 天内」限制——今天窗口（now+2h 向上取整 ~ 19:00）不足则跳过今天。
-/// 14 天均无空档时返回 None，由 sidecar 提示人工选择。
+/// 定时发布目标时刻（本地时间），今天起 14 天内按三层覆盖挑选：
+/// 1. 第一遍：最近一个「没有公开视频」的日子（发布日历口径，私密不占位），
+///    当天 08:00~19:00 随机分钟——与原逻辑一致，先保证每天都有 1 个；
+/// 2. 第二遍：14 天都有视频后，最近一个「恰好 1 个视频」的日子，按
+///    上午(08:00~12:00)→下午(12:00~19:00)→晚上(19:00~22:00) 顺序取第一个
+///    未被占用的时段（已有上午→下午、已有下午→上午的互补由此自然得出）；
+/// 3. 第三遍：同理给「恰好 2 个视频」的最近日子补第 3 个。
+///
+/// 今天（offset=0）还要求起始分钟 ≥ ceil(now+2h)（抖音「2 小时后及 14 天内」），
+/// 目标时段今天窗口不足则顺推下一空闲时段（上午/下午不足 → 晚上），三段都不足
+/// 则跳过今天。14 天 × 3 全满返回 None，由 sidecar 提示人工选择。
 pub fn pick_schedule_time(
-    occupied: &HashSet<NaiveDate>,
+    day_minutes: &HashMap<NaiveDate, Vec<i64>>,
     now: NaiveDateTime,
     rand_nanos: u32,
 ) -> Option<NaiveDateTime> {
     const OPEN_MIN: i64 = 8 * 60; // 08:00
-    const CLOSE_MIN: i64 = 19 * 60; // 19:00（不含）
+    const NOON_MIN: i64 = 12 * 60; // 12:00
+    const CLOSE_MIN: i64 = 19 * 60; // 19:00（原窗口关 = 下午关）
+    const NIGHT_CLOSE_MIN: i64 = 22 * 60; // 22:00（晚上关）
+    /// 上午 / 下午 / 晚上 时段（含开不含关）。
+    const SLOTS: [(i64, i64); 3] = [
+        (OPEN_MIN, NOON_MIN),
+        (NOON_MIN, CLOSE_MIN),
+        (CLOSE_MIN, NIGHT_CLOSE_MIN),
+    ];
+    /// 时刻归段：段外时刻归最近段（如 07:30→上午、23:00→晚上）。
+    fn slot_of(minute: i64) -> usize {
+        if minute < NOON_MIN {
+            0
+        } else if minute < CLOSE_MIN {
+            1
+        } else {
+            2
+        }
+    }
+
     let today = now.date();
+    // 今天可选的最早分钟（抖音限制不早于 2 小时后，向上取整）；
+    // now+2h 跨天则今天任何时刻都违反限制，置 MAX 使今天全部时段不可选。
+    let earliest = now + chrono::Duration::hours(2);
+    let earliest_today = if earliest.date() == today {
+        i64::from(earliest.num_seconds_from_midnight().div_ceil(60))
+    } else {
+        i64::MAX
+    };
+    let pick_in = |day: NaiveDate, start_min: i64, end_min: i64| {
+        let span = (end_min - start_min) as u32;
+        let minute = start_min + i64::from(rand_nanos % span);
+        day.and_hms_opt(0, 0, 0)
+            .map(|base| base + chrono::Duration::minutes(minute))
+    };
+
+    // 第一遍：空缺日优先（原逻辑）。
     for offset in 0..14 {
         let day = today + chrono::Duration::days(offset);
-        if occupied.contains(&day) {
+        if day_minutes.get(&day).is_some_and(|v| !v.is_empty()) {
             continue;
         }
-        let mut start_min = OPEN_MIN;
-        if offset == 0 {
-            let earliest = now + chrono::Duration::hours(2);
-            let ceil_min = earliest.num_seconds_from_midnight().div_ceil(60);
-            start_min = start_min.max(i64::from(ceil_min));
+        let start_min = if offset == 0 {
+            OPEN_MIN.max(earliest_today)
+        } else {
+            OPEN_MIN
+        };
+        if start_min < CLOSE_MIN {
+            return pick_in(day, start_min, CLOSE_MIN);
         }
-        if start_min >= CLOSE_MIN {
-            continue;
+    }
+
+    // 第二、三遍：恰好 want 个视频的最近日子，补顺序第一个未占用且可选择的时段。
+    for want in 1..=2usize {
+        for offset in 0..14 {
+            let day = today + chrono::Duration::days(offset);
+            let Some(times) = day_minutes.get(&day) else {
+                continue;
+            };
+            if times.len() != want {
+                continue;
+            }
+            let mut taken = [false; 3];
+            for &m in times {
+                taken[slot_of(m)] = true;
+            }
+            for (idx, &(slot_open, slot_close)) in SLOTS.iter().enumerate() {
+                if taken[idx] {
+                    continue;
+                }
+                let start_min = if offset == 0 {
+                    slot_open.max(earliest_today)
+                } else {
+                    slot_open
+                };
+                if start_min < slot_close {
+                    return pick_in(day, start_min, slot_close);
+                }
+            }
         }
-        let span = (CLOSE_MIN - start_min) as u32;
-        let minute = start_min + i64::from(rand_nanos % span);
-        return day
-            .and_hms_opt(0, 0, 0)
-            .map(|base| base + chrono::Duration::minutes(minute));
     }
     None
 }
@@ -190,11 +289,14 @@ fn spawn_sidecar(
     let jobs = base.join("jobs");
     std::fs::create_dir_all(&jobs)?;
     let job_path = jobs.join(format!("{draft_id}.json"));
-    // 定时发布：按日历空档日 + 08:00~19:00 随机分钟计算目标时刻（None = 14 天无空档，
+    // 定时发布：按日历 14 天三层覆盖（1→2→3 个/天）计算目标时刻（None = 全满，
     // sidecar 会提示人工选择）。
-    let occupied = DouyinPostsRepo::new(ctx.db).list_occupied_days()?;
+    let mut day_minutes: HashMap<NaiveDate, Vec<i64>> = HashMap::new();
+    for (d, m) in DouyinPostsRepo::new(ctx.db).list_day_video_minutes()? {
+        day_minutes.entry(d).or_default().push(m);
+    }
     let now = Local::now();
-    let schedule_time = pick_schedule_time(&occupied, now.naive_local(), now.timestamp_subsec_nanos());
+    let schedule_time = pick_schedule_time(&day_minutes, now.naive_local(), now.timestamp_subsec_nanos());
     let job = json!({
         "draftId": draft_id,
         "videoPath": asset.file_path,
@@ -205,6 +307,7 @@ fn spawn_sidecar(
         "progressFile": progress_path(&ctx.store, draft_id),
         "cancelFile": cancel_path(&ctx.store, draft_id),
         "confirmFile": confirm_path(&ctx.store, draft_id),
+        "coverDir": ctx.store.covers_dir(),
     });
     std::fs::write(&job_path, serde_json::to_string_pretty(&job)?)?;
 
@@ -222,10 +325,82 @@ fn spawn_sidecar(
         })
 }
 
-fn finalize_published(ctx: &AgentContext, draft_id: i64, asset_id: i64) -> Result<(), DomainError> {
+fn finalize_published(
+    ctx: &AgentContext,
+    draft_id: i64,
+    asset_id: i64,
+    capture: Option<PostCapture>,
+) -> Result<(), DomainError> {
     DraftsRepo::new(ctx.db).update_status(draft_id, DraftStatus::Published)?;
     AssetsRepo::new(ctx.db).update_status(asset_id, AssetStatus::Published)?;
+    register_local_post(ctx, draft_id, capture)
+}
+
+/// 发布完成后直接把作品登记进 douyin_posts，发布日历即时更新（不再跑整轮 douyin_sync）。
+/// 字段优先取 sidecar 捕获的页面实际值（用户可能手改过标题/定时），缺省回退 draft/job.json；
+/// 作品 id 缺失时用 local-draft-<draft_id> 占位，下次整轮 sync 拉到真实行后按标题+日期清理。
+fn register_local_post(
+    ctx: &AgentContext,
+    draft_id: i64,
+    capture: Option<PostCapture>,
+) -> Result<(), DomainError> {
+    let draft = DraftsRepo::new(ctx.db)
+        .get(draft_id)?
+        .ok_or_else(|| DomainError::InvalidData(format!("draft {draft_id} not found")))?;
+    let cap = capture.unwrap_or_default();
+    let schedule_str = cap
+        .schedule_time
+        .or_else(|| job_schedule_time(&ctx.store, draft_id));
+    let schedule_ts = schedule_str.as_deref().and_then(parse_local_ts);
+    let now = Local::now().timestamp();
+    let (status, create_time, public_time) = match schedule_ts {
+        Some(ts) if ts > now => ("scheduled", ts, 0),
+        // 定时时间已过（提交后停留太久才判定）按已发布记。
+        Some(ts) => ("published", ts, ts),
+        None => ("published", now, now),
+    };
+    let aweme_id = cap
+        .aweme_id
+        .unwrap_or_else(|| format!("local-draft-{draft_id}"));
+    let repo = DouyinPostsRepo::new(ctx.db);
+    // 真实行若已被整轮 sync 抢先拉取（带统计数据），不覆盖。
+    if !aweme_id.starts_with("local-") && repo.get_by_aweme(&aweme_id)?.is_some() {
+        return Ok(());
+    }
+    repo.upsert(&NewDouyinPost {
+        aweme_id,
+        title: cap.title.or(draft.title),
+        cover_path: cap.cover_path,
+        cover_url: None,
+        status: status.to_string(),
+        play_count: 0,
+        digg_count: 0,
+        comment_count: 0,
+        share_count: 0,
+        completion_rate: None,
+        bounce_rate_2s: None,
+        violation_status: None,
+        violation_text: None,
+        violation_brief: None,
+        violation_url: None,
+        create_time,
+        public_time,
+    })?;
     Ok(())
+}
+
+/// 读取 spawn 时写入 job.json 的定时时间（sidecar 捕获缺失时的兜底）。
+fn job_schedule_time(store: &crate::media::MediaStore, draft_id: i64) -> Option<String> {
+    let path = publish_dir(store).join("jobs").join(format!("{draft_id}.json"));
+    let raw = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v["scheduleTime"].as_str().map(String::from)
+}
+
+/// "YYYY-MM-DD HH:MM"（本地时间）→ epoch 秒。
+fn parse_local_ts(s: &str) -> Option<i64> {
+    let ndt = NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M").ok()?;
+    Local.from_local_datetime(&ndt).single().map(|dt| dt.timestamp())
 }
 
 fn waiting_json(
@@ -303,8 +478,8 @@ impl Agent for PublisherAgent {
         // 中间状态立即返回 Continue：任务保持 RUNNING，由 worker 每 2 秒重新领取轮询，
         // 避免长时间阻塞 worker（选文件/上传/转码可能耗时数分钟）。
         match state {
-            SidecarState::Published => {
-                finalize_published(ctx, draft_id, asset_id)?;
+            SidecarState::Published(post) => {
+                finalize_published(ctx, draft_id, asset_id, post)?;
                 Ok(AgentOutcome::Succeeded(json!({
                     "draft_id": draft_id,
                     "asset_id": asset_id,
@@ -346,9 +521,9 @@ impl Agent for PublisherAgent {
                 if current.status == DraftStatus::Draft {
                     DraftsRepo::new(ctx.db).update_status(draft_id, DraftStatus::Filled)?;
                 }
-                // 用户已点【我已发布】：人工确认发布完成。
+                // 用户已点【我已发布】：人工确认发布完成（sidecar 捕获缺失，走 draft/job 兜底值）。
                 if confirm_path(&ctx.store, draft_id).exists() {
-                    finalize_published(ctx, draft_id, asset_id)?;
+                    finalize_published(ctx, draft_id, asset_id, None)?;
                     Ok(AgentOutcome::Succeeded(json!({
                         "draft_id": draft_id,
                         "asset_id": asset_id,
@@ -361,7 +536,7 @@ impl Agent for PublisherAgent {
                         draft_id,
                         asset_id,
                         None,
-                        "标题/文案/话题已填写完成，标签页保持打开。请核对内容后，由你本人点击页面上的【发布】按钮；发布完成后点击【我已发布】。",
+                        "标题/文案/话题已填写完成，标签页保持打开。请核对内容后，由你本人点击页面上的【发布】按钮；发布成功后程序会自动检测并同步日历（若长时间未自动确认，可点【我已发布】兜底）。",
                     ))
                 }
             }

@@ -5,6 +5,7 @@ use crate::db::repos::douyin_posts::DouyinPostsRepo;
 use crate::db::repos::tasks::TasksRepo;
 use crate::domain::douyin::DouyinPost;
 use crate::domain::error::{ApiError, DomainError};
+use crate::settings::SettingsRepo;
 use crate::state::AppState;
 
 /// 发起一轮抖音作品数据同步（创作者中心作品列表 → douyin_posts 表）。
@@ -19,6 +20,21 @@ pub fn start_douyin_sync(state: State<AppState>) -> Result<i64, ApiError> {
         .into());
     }
     repo.enqueue("douyin_sync", "sync_works", json!({}), false)
+        .map_err(ApiError::from)
+}
+
+/// 自动巡检开关：开启后每 30 分钟自动同步一轮，发现违规作品自动处理。
+#[tauri::command]
+pub fn get_auto_sync_moderate(state: State<AppState>) -> Result<bool, ApiError> {
+    SettingsRepo::new(&state.db)
+        .get_auto_sync_moderate()
+        .map_err(ApiError::from)
+}
+
+#[tauri::command]
+pub fn set_auto_sync_moderate(state: State<AppState>, enabled: bool) -> Result<(), ApiError> {
+    SettingsRepo::new(&state.db)
+        .set_auto_sync_moderate(enabled)
         .map_err(ApiError::from)
 }
 

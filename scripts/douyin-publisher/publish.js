@@ -9,13 +9,15 @@
 //    应用弹窗展示视频路径（自动复制），用户手动选择文件后程序继续。
 // 3. 等待上传/转码完成，自动填写标题/文案/话题。
 // 4. 【绝不点击最终发布按钮】——填表完成后保持窗口打开，等待用户本人核对并点击发布。
-// 5. 仅当页面出现显式「发布成功」提示才上报 published；窗口关闭/取消如实上报。
+// 5. 发布已提交检测（页面跳转内容管理 / 显式成功提示 / 应用内【我已发布】，被动零点击），
+//    命中后读回注入钩子捕获的作品 id/标题/定时时间/封面，随 progress 上报 agent
+//    直接登记发布日历；结束仅释放会话租约，标签页保留给用户，绝不关闭。
 //
 // 用法：node publish.js <job.json>
 // job.json 字段：draftId / videoPath / title / body / hashtags[] /
 //                scheduleTime（"YYYY-MM-DD HH:mm" 本地时间或 null——agent 按发布日历
 //                空档日 + 08:00~19:00 随机分钟算好；null 表示 14 天无空档，提示人工）/
-//                progressFile / cancelFile / confirmFile
+//                progressFile / cancelFile / confirmFile / coverDir（封面落盘目录）
 
 import { execFile } from "node:child_process";
 import fs from "node:fs";
@@ -45,12 +47,13 @@ class TabClosed extends Error {}
 // 最近一次进度：心跳定时器原样重写，保持 progress 文件 mtime 常新。
 let lastProgress = null;
 
-function writeProgress(state, message) {
+function writeProgress(state, message, extra) {
   lastProgress = { state, message: message || "" };
   const payload = {
     state,
     message: message || "",
     updatedAt: new Date().toISOString(),
+    ...(extra || {}),
   };
   fs.writeFileSync(job.progressFile, JSON.stringify(payload, null, 2));
   console.log(`[publisher] ${state} ${message || ""}`);
@@ -541,6 +544,63 @@ function buildCoverVerifyScript(cfg) {
   })()`;
 }
 
+/** 设置封面槽位区（横封面4:3 / 竖封面3:4）状态探测（同步瞬时脚本）：
+ *  AI 推荐封面被选中应用到一个槽位后，另一个方向的槽位封面会进入自动生成。
+ *  以「设置封面」标题为锚向上找到含「横封面/竖封面」标签的槽位区容器，
+ *  其内可见叶子文本含「生成中」即未就绪。返回 {"state":"ready"|"generating"|"no-section"}。 */
+function buildCoverSlotsStateScript(cfg) {
+  return `(() => {
+    const K = ${JSON.stringify(cfg)};
+    let anchor = null;
+    for (const el of document.querySelectorAll("span,div")) {
+      if (el.children.length) continue;
+      if (el.offsetParent === null) continue;
+      if ((el.textContent || "").includes(K.slotTitlePattern)) { anchor = el; break; }
+    }
+    if (!anchor) return JSON.stringify({ state: "no-section" });
+    const slotRe = new RegExp(K.slotLabelPattern);
+    let scope = anchor;
+    for (let i = 0; i < 8 && scope; i += 1) {
+      if (slotRe.test(scope.textContent || "")) break;
+      scope = scope.parentElement;
+    }
+    if (!scope || !slotRe.test(scope.textContent || "")) return JSON.stringify({ state: "no-section" });
+    let generating = false;
+    for (const el of scope.querySelectorAll("span,div")) {
+      if (el.children.length) continue;
+      if (el.offsetParent === null) continue;
+      if ((el.textContent || "").includes(K.generatingPattern)) { generating = true; break; }
+    }
+    return JSON.stringify({ state: generating ? "generating" : "ready" });
+  })()`;
+}
+
+/** 等设置封面槽位区（另一个方向的封面）自动生成完毕：AI 封面选中应用后触发，
+ *  与 AI 封面生成同为慢操作（上限 180s），就绪后才应交还人工弹确认窗。
+ *  超时/连续探测失败返回 false（warn 提示人工），不阻断表单完成。 */
+async function waitCoverSlotsReady() {
+  const deadline = Date.now() + 180_000;
+  let noSection = 0;
+  while (Date.now() < deadline) {
+    if (markerExists(job.cancelFile)) throw new CancelRequested();
+    if (!(await sessionAlive())) throw new TabClosed("浏览器标签页已关闭");
+    // eval 返回裸文本（脚本内已 JSON.stringify），用 Raw 变体读取。
+    const raw = await runOpencliRaw([
+      "browser", session, "eval", buildCoverSlotsStateScript(SELECTORS.aiCover),
+    ]).catch(() => null);
+    try {
+      const st = JSON.parse(raw || "");
+      if (st.state === "ready") return true;
+      noSection = st.state === "no-section" ? noSection + 1 : 0;
+      if (noSection >= 5) return false;
+    } catch {
+      /* eval 往返异常，继续轮询 */
+    }
+    await sleep(3000);
+  }
+  return false;
+}
+
 /** 选 AI 推荐封面第 1 张：Node 侧轮询（每次 eval 瞬时返回，绕开 CDP 115s 单次上限），
  *  等「生成中」结束（AI 封面生成需数十秒，大视频更久，上限 150s）后用 opencli click
  *  （CDP 真实鼠标输入，先 scrollIntoView）点击第一项，再以主封面变化/选中标记校验。
@@ -694,6 +754,9 @@ async function fillComposer() {
   // AI 智能推荐封面（慢步骤放最后：生成需数十秒，等到就绪再点选第 1 张；
   // 校验不过不盲目报成功，提示人工核对）。
   const coverPicked = await pickAiRecommendCover();
+  // AI 封面选中应用到一个槽位后，另一个方向（横/竖）的槽位封面会进入自动生成——
+  // 等它也生成完再交还人工，避免确认窗弹出时槽位封面还是半成品。
+  const slotsReady = coverPicked ? await waitCoverSlotsReady() : false;
   const warns = [];
   if (tagFailed.length) {
     warns.push(`以下话题未能联想选中，仍是纯文本（不生效），请人工点选：${tagFailed.join("、")}`);
@@ -703,6 +766,9 @@ async function fillComposer() {
   }
   if (!coverPicked) {
     warns.push("AI 推荐封面未自动选中，请人工在「设置封面」区点选第 1 张推荐封面");
+  }
+  if (coverPicked && !slotsReady) {
+    warns.push("另一个方向的封面（横/竖）仍在自动生成中，请人工稍候核对");
   }
   if (job.scheduleTime && !schedSet) {
     warns.push("定时发布未自动设置，请人工选择「定时发布」并设置时间");
@@ -717,36 +783,175 @@ async function fillComposer() {
   writeProgress("form_filled", `标题/文案/话题已填写${declText}${coverText}${schedText}，请人工核对后点击页面上的【发布】${warn}`);
 }
 
+/** 发布信息捕获钩子：wrap 页面的 fetch/XHR，凡 `/media/(aweme|item|video)` 族接口
+ *  （草稿保存与发布提交同族，moderate 契约已确认该域族）响应里带 aweme_id/item_id 时，
+ *  把当时的页面实际值（标题/定时时间/封面截图）连同作品 id 快照进 localStorage。
+ *  localStorage 同源持久——发布提交后页面跳转到内容管理，数据仍可在新页面读回。 */
+async function injectPublishHook() {
+  const script = `(() => {
+    if (window.__pubHookInstalled) return 'already';
+    window.__pubHookInstalled = true;
+    const RE = new RegExp('media/(aweme|item|video)');
+    const pick = (j) => {
+      if (!j || typeof j !== 'object') return '';
+      const d = j.data && typeof j.data === 'object' ? j.data : j;
+      return String(d.aweme_id || d.item_id || '');
+    };
+    const snapCover = () => {
+      try {
+        const img = document.querySelector('[class*="recommendCover-"][class*="selected-"] img')
+          || document.querySelector('[class*="cover"] img[src^="blob:"]');
+        if (!img || !img.naturalWidth) return '';
+        const scale = Math.min(1, 480 / img.naturalWidth);
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        return c.toDataURL('image/jpeg', 0.8);
+      } catch (e) { return ''; }
+    };
+    const capture = (awemeId) => {
+      try {
+        const titleEl = document.querySelector('input[placeholder*="标题"],textarea[placeholder*="标题"]');
+        const timeInput = document.querySelector('input[placeholder="日期和时间"]');
+        localStorage.setItem('__pub_capture', JSON.stringify({
+          at: Date.now(),
+          awemeId: String(awemeId || ''),
+          title: (titleEl && titleEl.value) || '',
+          scheduleTime: (timeInput && timeInput.value) || '',
+          coverData: snapCover(),
+        }));
+      } catch (e) {}
+    };
+    const of = window.fetch.bind(window);
+    window.fetch = (...a) => of(...a).then((res) => {
+      try {
+        const u = typeof a[0] === 'string' ? a[0] : (a[0] && a[0].url) || '';
+        if (RE.test(u) && res.ok) {
+          res.clone().json().then((j) => { const id = pick(j); if (id) capture(id); }).catch(() => {});
+        }
+      } catch (e) {}
+      return res;
+    });
+    const oo = XMLHttpRequest.prototype.open;
+    const os = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (m, u, ...r) { this.__pubUrl = u; return oo.call(this, m, u, ...r); };
+    XMLHttpRequest.prototype.send = function (...a) {
+      this.addEventListener('load', () => {
+        try {
+          if (RE.test(this.__pubUrl || '') && this.status < 300) {
+            const id = pick(JSON.parse(this.responseText));
+            if (id) capture(id);
+          }
+        } catch (e) {}
+      });
+      return os.apply(this, a);
+    });
+    return 'installed';
+  })()`;
+  await runOpencliRaw(["browser", session, "eval", script]).catch(() => {});
+}
+
+/** 读回钩子快照（localStorage，跨页面跳转存活；30 分钟有效期防陈旧），读完即清除。
+ *  钩子未命中（接口改版）时以当前 DOM 值兜底（页面未跳转的场景）。 */
+async function readCapturedPost() {
+  const script = `(() => {
+    let c = null;
+    try { c = JSON.parse(localStorage.getItem('__pub_capture') || 'null'); } catch (e) {}
+    try { localStorage.removeItem('__pub_capture'); } catch (e) {}
+    if (c && c.at && Date.now() - c.at > 30 * 60 * 1000) c = null;
+    const titleEl = document.querySelector('input[placeholder*="标题"],textarea[placeholder*="标题"]');
+    const timeInput = document.querySelector('input[placeholder="日期和时间"]');
+    return JSON.stringify({
+      awemeId: (c && c.awemeId) || '',
+      title: (c && c.title) || (titleEl && titleEl.value) || '',
+      scheduleTime: (c && c.scheduleTime) || (timeInput && timeInput.value) || '',
+      coverData: (c && c.coverData) || '',
+    });
+  })()`;
+  const raw = await runOpencliRaw(["browser", session, "eval", script]).catch(() => "");
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** 封面 dataURL 落盘到 covers 目录（日历直接展示本地文件）；失败返回空串。 */
+function saveCoverData(coverData) {
+  const m = /^data:image\/(jpeg|jpg|png);base64,(.+)$/.exec(coverData || "");
+  if (!m || !job.coverDir) return "";
+  try {
+    fs.mkdirSync(job.coverDir, { recursive: true });
+    const p = path.join(
+      job.coverDir,
+      `local_${job.draftId}.${m[1] === "png" ? "png" : "jpg"}`,
+    );
+    fs.writeFileSync(p, Buffer.from(m[2], "base64"));
+    return p;
+  } catch {
+    return "";
+  }
+}
+
+/** 发布完成统一出口：读回钩子捕获的页面实际值（用户可能手改过标题/时间），
+ *  随 progress 上报，agent 据此直接登记发布日历（不再跑整轮同步）。
+ *  仅释放会话租约——标签页保留给用户，绝不关闭。 */
+async function finishPublished(message) {
+  const cap = (await readCapturedPost()) || {};
+  const coverPath = saveCoverData(cap.coverData);
+  writeProgress("published", message, {
+    post: {
+      awemeId: cap.awemeId || "",
+      title: cap.title || job.title || "",
+      scheduleTime: cap.scheduleTime || job.scheduleTime || "",
+      coverPath,
+    },
+  });
+  await runOpencli(["browser", session, "unbind"]).catch(() => {});
+  return "published";
+}
+
 async function monitorAfterFill() {
-  // 监控阶段：绝不点击发布按钮。仅等待取消、窗口关闭或显式「发布成功」提示。
+  // 监控阶段：绝不点击发布按钮。先注入发布信息捕获钩子，再等待取消、应用内确认、
+  // 窗口关闭或「发布已提交」信号。
   const navLog = path.join(logDir, `publisher-${job.draftId}-nav.log`);
+  await injectPublishHook();
   while (true) {
     if (markerExists(job.cancelFile)) {
       writeProgress("cancelled", "用户取消，标签页已保留（可手动处置）");
       await releaseSession();
       return "cancelled";
     }
-    if (!(await sessionAlive())) {
+    // 用户已在应用内点【我已发布】（自动检测失效时的兜底）：同样读回捕获值上报。
+    if (markerExists(job.confirmFile)) {
+      return await finishPublished("用户已在应用内确认发布（【我已发布】）");
+    }
+    // 一次 tab list 同时判活与取当前 URL（get url 会为无活页会话创建幽灵页，不用）。
+    const tabsRes = await runOpencli(["browser", session, "tab", "list"]).catch(() => null);
+    const tabs = Array.isArray(tabsRes) ? tabsRes : tabsRes?.tabs ?? [];
+    const httpTab = tabs.find((t) => String(t.url || "").startsWith("http"));
+    if (!httpTab) {
       writeProgress("browser_closed", "浏览器标签页已关闭，未完成发布");
       await runOpencli(["browser", session, "close"]).catch(() => {}); // 释放会话租约
       return "browser_closed";
     }
-    try {
-      const res = await runOpencli([
-        "browser",
-        session,
-        "find",
-        "--css",
-        SELECTORS.successIndicators[0],
-      ]);
-      if ((res?.entries ?? []).some((e) => e.visible)) {
-        writeProgress("published", "页面出现「发布成功」提示");
-        // 页面留给用户，解除会话租约：之后用户关窗不会触发 daemon 复活空白页。
-        await runOpencli(["browser", session, "unbind"]).catch(() => {});
-        return "published";
+    // 信号一（主）：页面跳转到内容管理页 = 发布已提交。「发布成功」toast 一闪而过，
+    // 3s 轮询未必抓得到，URL 跳转是更可靠的滞后证据。
+    const url = String(httpTab.url || "");
+    if (url.includes("/creator-micro/content/manage")) {
+      return await finishPublished(`页面已跳转到内容管理（${url}），发布已提交`);
+    }
+    // 信号二：显式「发布成功」提示（发布后未跳页的场景）。
+    for (const sel of SELECTORS.successIndicators) {
+      try {
+        const res = await runOpencli(["browser", session, "find", "--css", sel]);
+        if ((res?.entries ?? []).some((e) => e.visible)) {
+          return await finishPublished(`页面出现「发布成功」提示（${sel}）`);
+        }
+      } catch {
+        /* 继续轮询 */
       }
-    } catch {
-      /* 继续轮询 */
     }
     await new Promise((r) => setTimeout(r, 3000));
   }

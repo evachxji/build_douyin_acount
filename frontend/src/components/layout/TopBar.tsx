@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
@@ -22,19 +22,47 @@ export function TopBar({
   const waitingCount = useTaskStore((s) =>
     s.tasks.filter((t) => t.status === "WAITING_FOR_HUMAN").length,
   );
+  const collecting = useTaskStore((s) =>
+    s.tasks.some(
+      (t) => t.agent_name === "collector" && ["PENDING", "RUNNING"].includes(t.status),
+    ),
+  );
   const [analyzing, setAnalyzing] = useState(false);
+  const [collectStarting, setCollectStarting] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
   const calBtnRef = useRef<HTMLButtonElement | null>(null);
+  // 自动巡检开关：每 30 分钟自动同步抖音数据，发现违规作品自动处理。
+  const [autoSync, setAutoSync] = useState(false);
+
+  useEffect(() => {
+    api.getAutoSyncModerate().then(setAutoSync).catch(() => {});
+  }, []);
+
+  const toggleAutoSync = async () => {
+    const next = !autoSync;
+    setAutoSync(next);
+    try {
+      await api.setAutoSyncModerate(next);
+    } catch (e) {
+      setAutoSync(!next); // 回滚
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const handleCollect = async () => {
+    // 点击即置灰，refresh 拉到新任务后再交给 collecting 状态接力（避免轮询空窗内重复点击）。
+    setCollectStarting(true);
     try {
       const tasks = await api.startCollection();
       setTaskOpen(true);
+      await useTaskStore.getState().refresh();
       setTimeout(() => void useTaskStore.getState().refresh(), 1200);
       return tasks;
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
       return null;
+    } finally {
+      setCollectStarting(false);
     }
   };
 
@@ -97,6 +125,30 @@ export function TopBar({
       <div className="flex-1" />
 
       <button
+        role="switch"
+        aria-checked={autoSync}
+        onClick={() => void toggleAutoSync()}
+        className={`flex h-9 items-center gap-2 rounded border px-2.5 text-xs transition-colors ${
+          autoSync
+            ? "border-accent bg-accent/15 text-accent"
+            : "border-line text-mute hover:border-accent/40 hover:text-paper"
+        }`}
+        title="自动巡检：每 30 分钟自动同步抖音数据；发现违规视频时自动处理（设为仅自己可见，今天发布的会把最晚定时作品改为立即发布）"
+      >
+        <span
+          className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
+            autoSync ? "bg-accent" : "bg-line"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
+              autoSync ? "left-3.5" : "left-0.5"
+            }`}
+          />
+        </span>
+        自动巡检
+      </button>
+      <button
         onClick={() => void reload()}
         className="h-9 rounded border border-line px-3 text-sm text-mute hover:border-accent/40 hover:text-paper"
         title="刷新"
@@ -106,10 +158,15 @@ export function TopBar({
       <OllamaStatusTag />
       <button
         onClick={() => void handleCollect()}
-        className="h-9 rounded border border-accent bg-accent/10 px-3 text-sm text-accent hover:bg-accent/20"
-        title="按设置配额刷 TikTok / Instagram 推荐流采集并下载"
+        disabled={collecting || collectStarting}
+        className="h-9 rounded border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-accent enabled:bg-accent/10 enabled:text-accent enabled:hover:bg-accent/20"
+        title={
+          collecting
+            ? "采集任务执行中，完成后可再次发起"
+            : "按设置配额刷 TikTok / Instagram 推荐流采集并下载"
+        }
       >
-        开始采集
+        {collecting ? "采集中…" : "开始采集"}
       </button>
       <button
         onClick={() => void handleAnalyze()}

@@ -168,9 +168,10 @@ export function CalendarPopover({
   const wheelAccRef = useRef(0);
   const wheelLockRef = useRef(0);
 
+  // 每次打开都重新拉取：store 是常驻缓存，后台同步（尤其自动巡检）可能早已完成。
   useEffect(() => {
-    if (!loaded) void load();
-  }, [loaded, load]);
+    void load();
+  }, [load]);
 
   // 初始位置：锚点按钮正下方、左对齐，防右侧越界。
   const [pos] = useState(() => {
@@ -220,6 +221,13 @@ export function CalendarPopover({
   const moderateActive = tasks.some(
     (t) => t.agent_name === "douyin_moderate" && ["PENDING", "RUNNING"].includes(t.status),
   );
+  // 同步任务从活跃转为结束（含自动巡检轮次）→ 刷新作品数据与「上次同步」时间。
+  const prevSyncActive = useRef(syncTaskActive);
+  useEffect(() => {
+    const was = prevSyncActive.current;
+    prevSyncActive.current = syncTaskActive;
+    if (was && !syncTaskActive) void load();
+  }, [syncTaskActive, load]);
   const violationCount = useMemo(
     () => posts.filter((p) => hasViolation(p) && !isPrivate(p)).length,
     [posts],

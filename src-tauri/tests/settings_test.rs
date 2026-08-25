@@ -64,6 +64,30 @@ fn settings_roundtrip_persists_fields() {
 }
 
 #[test]
+fn auto_sync_moderate_flag_roundtrip() {
+    let db = test_db();
+    let repo = SettingsRepo::new(&db);
+    assert!(!repo.get_auto_sync_moderate().expect("default"), "默认关");
+    repo.set_auto_sync_moderate(true).expect("set on");
+    assert!(repo.get_auto_sync_moderate().expect("get on"));
+    repo.set_auto_sync_moderate(false).expect("set off");
+    assert!(!repo.get_auto_sync_moderate().expect("get off"));
+}
+
+#[test]
+fn auto_sync_moderate_flag_independent_of_app_settings_json() {
+    // 开关是独立 key：保存完整 AppSettings 不得覆盖它，反之亦然。
+    let db = test_db();
+    let repo = SettingsRepo::new(&db);
+    repo.set_auto_sync_moderate(true).expect("set on");
+    repo.save(&AppSettings::default()).expect("save app settings");
+    assert!(repo.get_auto_sync_moderate().expect("still on"), "保存 AppSettings 不得重置开关");
+    repo.set_auto_sync_moderate(false).expect("set off");
+    let loaded = repo.load().expect("load app settings");
+    assert_eq!(loaded, AppSettings::default(), "开关读写不得触碰 AppSettings JSON");
+}
+
+#[test]
 fn settings_load_legacy_json_without_conditions_keeps_defaults() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = Database::open(&dir.path().join("test.db")).expect("open db");
