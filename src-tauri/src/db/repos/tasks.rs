@@ -144,6 +144,74 @@ impl<'a> TasksRepo<'a> {
         }))
     }
 
+    /// 领取全部活跃任务（publisher 并行模型）：RUNNING 全部 + 退避到期的 PENDING
+    /// （PENDING 升级为 RUNNING 且 attempts+1，单次语义与 claim_next 一致）。
+    /// 按 created_at 升序返回，供 runtime 每轮驱动所有进行中的任务。
+    pub fn claim_all_active(&self, agent_name: &str) -> Result<Vec<AgentTask>, DomainError> {
+        let conn = self.db.conn();
+        let now_ts = now();
+        let tasks = {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM agent_tasks
+                 WHERE agent_name = ?1 AND (
+                     status = 'RUNNING'
+                     OR (status = 'PENDING' AND (next_retry_at IS NULL OR next_retry_at <= ?2))
+                 )
+                 ORDER BY created_at ASC",
+            )?;
+            let rows = stmt
+                .query_map(params![agent_name, now_ts.as_str()], row_to_task)?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        let mut claimed = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            if task.status == TaskStatus::Pending {
+                let attempts = task.attempts + 1;
+                conn.execute(
+                    "UPDATE agent_tasks SET status = 'RUNNING', attempts = ?1,
+                     error = NULL, updated_at = ?2 WHERE id = ?3",
+                    params![attempts, now_ts.as_str(), task.id],
+                )?;
+                claimed.push(AgentTask {
+                    status: TaskStatus::Running,
+                    attempts,
+                    error: None,
+                    updated_at: now_ts.clone(),
+                    ..task
+                });
+            } else {
+                claimed.push(task);
+            }
+        }
+        Ok(claimed)
+    }
+
+    /// 其他活跃发布任务已选定的定时时刻（payload.schedule_time 字符串），供 spawn
+    /// 时并发占位：任务 finalize 前其定时不在 douyin_posts 日历里，靠这里补位顺延。
+    /// 排除本任务（僵尸重拉时自己的 payload 已写入旧值，不能自己占自己的位）。
+    pub fn list_active_schedule_times(
+        &self,
+        exclude_task_id: i64,
+    ) -> Result<Vec<String>, DomainError> {
+        let conn = self.db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT payload_json FROM agent_tasks
+             WHERE agent_name = 'publisher' AND status IN ('PENDING','RUNNING') AND id != ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![exclude_task_id], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut out = Vec::new();
+        for raw in rows {
+            let payload: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+            if let Some(s) = payload["schedule_time"].as_str() {
+                out.push(s.to_string());
+            }
+        }
+        Ok(out)
+    }
+
     pub fn succeed(&self, id: i64) -> Result<(), DomainError> {
         self.transition(id, TaskStatus::Succeeded)
     }

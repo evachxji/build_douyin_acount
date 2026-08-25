@@ -169,12 +169,14 @@ pub fn run() {
                 }
             });
             // 后台 worker：publisher / collector / douyin_sync / content 任务（独立线程，避免阻塞 vision 队列）。
+            // publisher 走 run_active 并行模型：每轮驱动全部活跃发布任务（sidecar 会话按
+            // draft_id 隔离，定时时间在 spawn 时并发占位顺延）；其余 Agent 维持串行。
             let handle_pub = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 let state = handle_pub.state::<AppState>();
                 if let Ok(runtime) = state.build_runtime() {
-                    if let Err(e) = runtime.run_once("publisher") {
+                    if let Err(e) = runtime.run_active("publisher") {
                         tracing::warn!("publisher worker error: {e}");
                     }
                     if let Err(e) = runtime.run_once("collector") {

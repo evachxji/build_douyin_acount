@@ -8,6 +8,7 @@ use crate::db::repos::tasks::TasksRepo;
 use crate::media::MediaStore;
 
 use super::{Agent, AgentOutcome};
+use crate::domain::task::AgentTask;
 
 /// 一次 `run_once` 的处理结果。
 #[derive(Debug)]
@@ -46,20 +47,14 @@ impl<'a> AgentRuntime<'a> {
         self.agents.keys().copied().collect()
     }
 
-    /// 领取并执行一个任务（同一 Agent 串行）。
-    pub fn run_once(&self, agent_name: &str) -> Result<RunResult, crate::domain::error::DomainError> {
-        let Some(agent) = self.agents.get(agent_name) else {
-            return Ok(RunResult { processed: false });
-        };
+    /// 任务执行结果的终态处理（成功/等待人工/取消/失败写库）；Continue 不动，
+    /// 任务保持 RUNNING 由下一轮重新领取继续轮询。
+    fn handle_outcome(
+        &self,
+        task: &AgentTask,
+        outcome: Result<AgentOutcome, crate::domain::error::DomainError>,
+    ) -> Result<(), crate::domain::error::DomainError> {
         let tasks = TasksRepo::new(self.db);
-        let Some(task) = tasks.claim_next(agent_name)? else {
-            return Ok(RunResult { processed: false });
-        };
-        tasks.add_log(task.id, "INFO", &format!("task {} started", task.task_type))?;
-        let outcome = agent.run(&crate::agents::AgentContext {
-            db: self.db,
-            store: self.store.clone(),
-        }, task.clone());
         match outcome {
             Ok(AgentOutcome::Succeeded(output)) => {
                 tasks.add_log(task.id, "INFO", &format!("task succeeded: {output}"))?;
@@ -75,13 +70,52 @@ impl<'a> AgentRuntime<'a> {
                 tasks.add_log(task.id, "INFO", &format!("task cancelled: {info}"))?;
                 tasks.cancel(task.id)?;
             }
-            Ok(AgentOutcome::Continue) => {
-                // 无终态：任务保持 RUNNING，下一轮 run_once 重新领取继续轮询。
-            }
+            Ok(AgentOutcome::Continue) => {}
             Err(e) => {
                 tasks.add_log(task.id, "ERROR", &e.to_string())?;
                 tasks.fail(task.id, &e.to_string())?;
             }
+        }
+        Ok(())
+    }
+
+    /// 领取并执行一个任务（同一 Agent 串行）。
+    pub fn run_once(&self, agent_name: &str) -> Result<RunResult, crate::domain::error::DomainError> {
+        let Some(agent) = self.agents.get(agent_name) else {
+            return Ok(RunResult { processed: false });
+        };
+        let tasks = TasksRepo::new(self.db);
+        let Some(task) = tasks.claim_next(agent_name)? else {
+            return Ok(RunResult { processed: false });
+        };
+        tasks.add_log(task.id, "INFO", &format!("task {} started", task.task_type))?;
+        let outcome = agent.run(&crate::agents::AgentContext {
+            db: self.db,
+            store: self.store.clone(),
+        }, task.clone());
+        self.handle_outcome(&task, outcome)?;
+        Ok(RunResult { processed: true })
+    }
+
+    /// 领取并执行全部活跃任务（publisher 并行模型：多个发布任务同时进行，
+    /// 每轮驱动所有 RUNNING + 退避到期的 PENDING；sidecar 会话与标记文件
+    /// 按 draft_id 隔离，定时时间由 spawn 时的并发占位保证顺延）。
+    pub fn run_active(&self, agent_name: &str) -> Result<RunResult, crate::domain::error::DomainError> {
+        let Some(agent) = self.agents.get(agent_name) else {
+            return Ok(RunResult { processed: false });
+        };
+        let tasks = TasksRepo::new(self.db).claim_all_active(agent_name)?;
+        if tasks.is_empty() {
+            return Ok(RunResult { processed: false });
+        }
+        let repo = TasksRepo::new(self.db);
+        for task in tasks {
+            repo.add_log(task.id, "INFO", &format!("task {} started", task.task_type))?;
+            let outcome = agent.run(&crate::agents::AgentContext {
+                db: self.db,
+                store: self.store.clone(),
+            }, task.clone());
+            self.handle_outcome(&task, outcome)?;
         }
         Ok(RunResult { processed: true })
     }

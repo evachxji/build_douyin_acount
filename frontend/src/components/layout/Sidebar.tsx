@@ -6,6 +6,7 @@ import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { statusMeta } from "../../lib/format";
+import { PublishProgressList } from "./PublishProgressList";
 
 // 分析中不单独展示，归入"待处理"（NEW）；下载失败不展示。
 const STATUS_ORDER = [
@@ -226,6 +227,7 @@ export function Sidebar({ width }: { width: number }) {
           );
         })}
       </div>
+      <PublishProgressList />
       <div className="flex justify-end gap-2 border-t border-line px-3 py-2">
         <button
           onClick={() => void handleExportData()}

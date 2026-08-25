@@ -28,6 +28,10 @@
   "publishButtons": [
     "button:has-text('发布')"
   ],
+  "publishButton": {
+    "_comment": "发布按钮：用户在应用内点勾授权后由 sidecar 代点一次（唯一授权路径）。按可见文本精确匹配可见且未 disabled 的 button；设置定时发布后按钮文本变为「定时发布」。识别不到或匹配到多个一律不点（不盲目操作），由进度消息提示人工",
+    "labels": ["发布", "定时发布"]
+  },
   "successIndicators": [
     "text=发布成功",
     "text=已发布"

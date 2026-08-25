@@ -1,5 +1,5 @@
 ﻿//! Publisher Agent 集成测试：用假 sidecar 验证「自动上传文件 -> 自动填表 ->
-//! 人工确认发布」的完整人机协作状态流。
+//! 点勾授权代点发布」的完整人机协作状态流。
 use std::path::{Path, PathBuf};
 
 use build_douyin_acount_lib::agents::publisher::{
@@ -179,24 +179,44 @@ fn publisher_spawns_sidecar_and_auto_fills() {
         store: env.store.clone(),
     };
     // 模拟 worker 每轮重新领取：sidecar 拉起后自动完成 uploading -> form_filled，
-    // agent 在后续轮次看到 form_filled 进入 form_ready。
-    let mut outcome = None;
+    // agent 在后续轮次看到 form_filled 写入 stage=form_ready 并保持 RUNNING。
+    let mut payload = None;
     for _ in 0..20 {
         let task = claim(&env);
-        outcome = Some(env.agent.run(&ctx, task).expect("run"));
-        if !matches!(outcome.as_ref().unwrap(), AgentOutcome::Continue) {
+        let outcome = env.agent.run(&ctx, task).expect("run");
+        assert!(
+            matches!(outcome, AgentOutcome::Continue),
+            "并行轮询模型下应始终 Continue，实际 {outcome:?}"
+        );
+        let t = TasksRepo::new(&env.db)
+            .get(env.task_id)
+            .expect("get")
+            .expect("task");
+        payload = Some(t.payload);
+        if payload.as_ref().unwrap()["stage"] == "form_ready" {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(150));
     }
-    let outcome = outcome.expect("ran at least once");
-    let payload = match outcome {
-        AgentOutcome::WaitingForHuman(p) => p,
-        other => panic!("expected WaitingForHuman, got {other:?}"),
-    };
+    let payload = payload.expect("ran at least once");
     assert_eq!(payload["stage"], "form_ready");
-    let draft = DraftsRepo::new(&env.db).get(env.draft_id).expect("get").expect("draft");
+    assert_eq!(payload["title"], "测试标题");
+    // spawn 时计算并写入定时时间（测试库日历为空，14 天内必有空档日）。
+    assert!(
+        payload["schedule_time"].is_string(),
+        "payload 应含 schedule_time：{payload}"
+    );
+    let draft = DraftsRepo::new(&env.db)
+        .get(env.draft_id)
+        .expect("get")
+        .expect("draft");
     assert_eq!(draft.status, DraftStatus::Filled);
+    // 任务保持 RUNNING 等待点勾授权（不再进入 WAITING_FOR_HUMAN）。
+    let t = TasksRepo::new(&env.db)
+        .get(env.task_id)
+        .expect("get")
+        .expect("task");
+    assert_eq!(t.status, TaskStatus::Running);
 }
 
 #[test]
@@ -210,17 +230,23 @@ fn publisher_auto_detects_form_ready_after_fill() {
     };
     let task = claim(&env);
     let outcome = env.agent.run(&ctx, task).expect("run");
-    let payload = match outcome {
-        AgentOutcome::WaitingForHuman(p) => p,
-        other => panic!("expected WaitingForHuman, got {other:?}"),
-    };
-    assert_eq!(payload["stage"], "form_ready");
-    let draft = DraftsRepo::new(&env.db).get(env.draft_id).expect("get").expect("draft");
+    assert!(matches!(outcome, AgentOutcome::Continue), "{outcome:?}");
+    let t = TasksRepo::new(&env.db)
+        .get(env.task_id)
+        .expect("get")
+        .expect("task");
+    assert_eq!(t.status, TaskStatus::Running);
+    assert_eq!(t.payload["stage"], "form_ready");
+    assert_eq!(t.payload["message"], "fake form filled");
+    let draft = DraftsRepo::new(&env.db)
+        .get(env.draft_id)
+        .expect("get")
+        .expect("draft");
     assert_eq!(draft.status, DraftStatus::Filled);
 }
 
 #[test]
-fn publisher_finalizes_when_human_confirms_publish() {
+fn publisher_confirm_marker_alone_does_not_finalize() {
     let env = setup();
     write_progress(&env, "form_filled", "filled");
     request_confirm(&env.store, env.draft_id).expect("confirm");
@@ -228,15 +254,37 @@ fn publisher_finalizes_when_human_confirms_publish() {
         db: &env.db,
         store: env.store.clone(),
     };
+    // confirm 标记只是给 sidecar 的点勾授权信号（sidecar 据此代点发布按钮），
+    // agent 不再据此直接收尾。
     let task = claim(&env);
     let outcome = env.agent.run(&ctx, task).expect("run");
-    assert!(matches!(outcome, AgentOutcome::Succeeded(_)));
-    let draft = DraftsRepo::new(&env.db).get(env.draft_id).expect("get").expect("draft");
+    assert!(matches!(outcome, AgentOutcome::Continue), "{outcome:?}");
+    let asset = AssetsRepo::new(&env.db)
+        .get(env.asset_id)
+        .expect("get")
+        .expect("asset");
+    assert_ne!(asset.status, AssetStatus::Published, "confirm 不得直接标记已发布");
+    let post = DouyinPostsRepo::new(&env.db)
+        .get_by_aweme(&format!("local-draft-{}", env.draft_id))
+        .expect("get post");
+    assert!(post.is_none(), "未收到 published 前不得登记日历");
+    // sidecar 响应授权、代点发布并检测到成功信号，写 published 上报：agent 据此收尾。
+    write_progress(&env, "published", "fake published");
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Succeeded(_)), "{outcome:?}");
+    let draft = DraftsRepo::new(&env.db)
+        .get(env.draft_id)
+        .expect("get")
+        .expect("draft");
     assert_eq!(draft.status, DraftStatus::Published);
-    let asset = AssetsRepo::new(&env.db).get(env.asset_id).expect("get").expect("asset");
+    let asset = AssetsRepo::new(&env.db)
+        .get(env.asset_id)
+        .expect("get")
+        .expect("asset");
     assert_eq!(asset.status, AssetStatus::Published);
-    // 人工确认路径无 sidecar 捕获：兜底登记（local-draft 占位 id + draft 标题 + 立即发布），
-    // 日历即时更新；不再入队 douyin_sync。
+    // sidecar 捕获缺失（published 无 post 字段）：兜底登记（local-draft 占位 id +
+    // draft 标题 + 立即发布），日历即时更新；不再入队 douyin_sync。
     let post = DouyinPostsRepo::new(&env.db)
         .get_by_aweme(&format!("local-draft-{}", env.draft_id))
         .expect("get post")
@@ -401,8 +449,9 @@ fn publisher_stale_sidecar_cancelled_after_max_respawns() {
 }
 
 #[test]
-fn publisher_never_respawns_form_filled_even_when_stale() {
-    // form_filled 是人工等待态（确认/取消走标记文件），sidecar 死了也不需要重拉。
+fn publisher_cancels_when_form_filled_sidecar_stale() {
+    // form_filled 阶段点勾代点依赖 sidecar 存活；心跳冻结视为进程已死——不重拉
+    // （重拉会重新上传填表，且用户可能已在页面手动发布），直接取消并提示核实后台。
     let env = setup();
     write_progress(&env, "form_filled", "filled");
     let agent = PublisherAgent::new("node", fixture("fake_publish.cjs"))
@@ -413,9 +462,145 @@ fn publisher_never_respawns_form_filled_even_when_stale() {
     };
     let task = claim(&env);
     let outcome = agent.run(&ctx, task).expect("run");
-    assert!(matches!(outcome, AgentOutcome::WaitingForHuman(_)), "{outcome:?}");
-    let t = TasksRepo::new(&env.db).get(env.task_id).expect("get").expect("task");
+    match outcome {
+        AgentOutcome::Cancelled(v) => {
+            assert!(v["reason"].as_str().unwrap_or("").contains("失联"), "{v}")
+        }
+        other => panic!("expected Cancelled, got {other:?}"),
+    }
+    let t = TasksRepo::new(&env.db)
+        .get(env.task_id)
+        .expect("get")
+        .expect("task");
     assert!(t.payload.get("respawns").is_none(), "form_filled 不得计重拉次数");
+}
+
+#[test]
+fn publisher_schedule_time_skips_slots_taken_by_active_tasks() {
+    // 并发占位：日历「今天已有 1 个视频」+ 另一活跃发布任务已选定「明天 10:00」，
+    // 本任务 spawn 时应把两者都视为占位——今天非空缺、明天被占，顺延到后天。
+    let env = setup();
+    let today_10am = local_ts(&Local::now().format("%Y-%m-%d 10:00").to_string());
+    DouyinPostsRepo::new(&env.db)
+        .upsert(&NewDouyinPost {
+            aweme_id: "seed-today".to_string(),
+            title: None,
+            cover_path: None,
+            cover_url: None,
+            status: "published".to_string(),
+            play_count: 0,
+            digg_count: 0,
+            comment_count: 0,
+            share_count: 0,
+            completion_rate: None,
+            bounce_rate_2s: None,
+            violation_status: None,
+            violation_text: None,
+            violation_brief: None,
+            violation_url: None,
+            create_time: today_10am,
+            public_time: today_10am,
+        })
+        .expect("seed calendar");
+    let tomorrow_10am = (Local::now() + chrono::Duration::days(1)).format("%Y-%m-%d 10:00").to_string();
+    let other_task = TasksRepo::new(&env.db)
+        .enqueue(
+            "publisher",
+            "prepare_publish",
+            json!({ "draft_id": 999, "asset_id": 999 }),
+            true,
+        )
+        .expect("enqueue other");
+    TasksRepo::new(&env.db)
+        .update_payload(other_task, json!({ "schedule_time": tomorrow_10am }))
+        .expect("seed other schedule");
+
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    let outcome = env.agent.run(&ctx, task).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Continue), "{outcome:?}");
+    let job_path = env
+        .store
+        .root()
+        .join("publish")
+        .join("jobs")
+        .join(format!("{}.json", env.draft_id));
+    let job: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(job_path).expect("read job"),
+    )
+    .expect("parse job");
+    let st = job["scheduleTime"].as_str().expect("scheduleTime");
+    let day_after = (Local::now() + chrono::Duration::days(2))
+        .format("%Y-%m-%d")
+        .to_string();
+    assert!(
+        st.starts_with(&day_after),
+        "今天被日历占位、明天被活跃任务占位，应顺延到后天 {day_after}，实际 {st}"
+    );
+}
+
+#[test]
+fn claim_all_active_returns_all_running_and_due_pending() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = Database::open(&dir.path().join("test.db")).expect("db");
+    let repo = TasksRepo::new(&db);
+    let t1 = repo
+        .enqueue("publisher", "prepare_publish", json!({}), true)
+        .expect("t1");
+    let t2 = repo
+        .enqueue("publisher", "prepare_publish", json!({}), true)
+        .expect("t2");
+    let t3 = repo
+        .enqueue("publisher", "prepare_publish", json!({}), true)
+        .expect("t3");
+    let other = repo
+        .enqueue("collector", "collect", json!({}), false)
+        .expect("other");
+    // 全部 PENDING 且退避到期（next_retry_at NULL）：一次全部领取并升级 RUNNING。
+    let claimed = repo.claim_all_active("publisher").expect("claim all");
+    assert_eq!(claimed.len(), 3);
+    assert!(claimed.iter().all(|t| t.status == TaskStatus::Running));
+    assert!(claimed.iter().all(|t| t.attempts == 1));
+    // 终态任务不再返回；RUNNING 重复认领不累加 attempts；其他 agent 互不影响。
+    repo.succeed(t1).expect("succeed");
+    repo.cancel(t2).expect("cancel");
+    let claimed = repo.claim_all_active("publisher").expect("claim all");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, t3);
+    assert_eq!(claimed[0].attempts, 1, "RUNNING 重复认领不累加 attempts");
+    let claimed = repo.claim_all_active("collector").expect("claim collector");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, other);
+}
+
+#[test]
+fn list_active_schedule_times_excludes_terminal_and_self() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = Database::open(&dir.path().join("test.db")).expect("db");
+    let repo = TasksRepo::new(&db);
+    let t1 = repo
+        .enqueue("publisher", "prepare_publish", json!({}), true)
+        .expect("t1");
+    repo.update_payload(t1, json!({ "schedule_time": "2100-01-02 10:00" }))
+        .expect("seed t1");
+    let t2 = repo
+        .enqueue("publisher", "prepare_publish", json!({}), true)
+        .expect("t2");
+    repo.update_payload(t2, json!({ "schedule_time": "2100-01-03 11:00" }))
+        .expect("seed t2");
+    // 无 schedule_time 的活跃任务不产生占位。
+    repo.enqueue("publisher", "prepare_publish", json!({}), true)
+        .expect("t3");
+    let times = repo.list_active_schedule_times(t1).expect("times");
+    assert_eq!(times, vec!["2100-01-03 11:00".to_string()], "排除本任务");
+    // 升级为 RUNNING 后置终态（状态机不允许 PENDING -> SUCCEEDED）。
+    repo.claim_all_active("publisher").expect("claim");
+    repo.succeed(t2).expect("succeed");
+    let times = repo.list_active_schedule_times(t1).expect("times");
+    assert!(times.is_empty(), "终态任务不占位");
 }
 
 #[test]

@@ -8,8 +8,11 @@
 //    注入失败/超时（页面改版、元素缺失、大文件内存不足）时回退人工流程：
 //    应用弹窗展示视频路径（自动复制），用户手动选择文件后程序继续。
 // 3. 等待上传/转码完成，自动填写标题/文案/话题。
-// 4. 【绝不点击最终发布按钮】——填表完成后保持窗口打开，等待用户本人核对并点击发布。
-// 5. 发布已提交检测（页面跳转内容管理 / 显式成功提示 / 应用内【我已发布】，被动零点击），
+// 4. 【发布按钮点击的唯一授权路径】填表完成后停在发布前，等待用户在应用内
+//    侧栏点勾授权（confirm 标记），sidecar 据此代点一次发布按钮（仅一次，
+//    幂等）；用户亦可自行在页面点击发布（跳转检测兜底）。除此之外不存在任何
+//    自动/定时/批量触发点击的路径；识别不到按钮元素即停止并提示，不盲目操作。
+// 5. 发布已提交检测（页面跳转内容管理 / 显式成功提示，被动零点击），
 //    命中后读回注入钩子捕获的作品 id/标题/定时时间/封面，随 progress 上报 agent
 //    直接登记发布日历；结束仅释放会话租约，标签页保留给用户，绝不关闭。
 //
@@ -912,20 +915,67 @@ async function finishPublished(message) {
   return "published";
 }
 
+/** 发布按钮点击脚本（同步瞬时）：用户在应用内点勾授权后由 sidecar 代点一次。
+ *  按候选可见文本精确匹配「可见且未 disabled」的 button（候选含「定时发布」——
+ *  设置定时后按钮文本变化）。返回 'clicked' / 'not-found' / 'ambiguous'。
+ *  识别不到或匹配到多个一律不点（不盲目操作），由进度消息提示人工。 */
+function buildPublishClickScript(labels) {
+  return `(() => {
+    const L = ${JSON.stringify(labels)};
+    const btns = [...document.querySelectorAll("button")].filter((b) => {
+      if (b.offsetParent === null) return false;
+      if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+      return L.includes((b.textContent || "").replace(/\\s+/g, ""));
+    });
+    if (!btns.length) return "not-found";
+    if (btns.length > 1) return "ambiguous";
+    const b = btns[0];
+    b.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    b.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    b.click();
+    return "clicked";
+  })()`;
+}
+
 async function monitorAfterFill() {
-  // 监控阶段：绝不点击发布按钮。先注入发布信息捕获钩子，再等待取消、应用内确认、
-  // 窗口关闭或「发布已提交」信号。
+  // 监控阶段：先注入发布信息捕获钩子，再等待取消、点勾授权（confirm 标记，
+  // 代点一次发布按钮）、窗口关闭或「发布已提交」信号。除点勾授权的一次代点外，
+  // 绝不主动点击发布按钮；用户自行在页面点击发布同样被检测兜底。
   const navLog = path.join(logDir, `publisher-${job.draftId}-nav.log`);
   await injectPublishHook();
+  // confirm 标记文件持续存在——confirmHandled 保证整个监控期只代点一次。
+  let confirmHandled = false;
+  let publishClickedAt = 0;
+  let slowWarned = false;
   while (true) {
     if (markerExists(job.cancelFile)) {
       writeProgress("cancelled", "用户取消，标签页已保留（可手动处置）");
       await releaseSession();
       return "cancelled";
     }
-    // 用户已在应用内点【我已发布】（自动检测失效时的兜底）：同样读回捕获值上报。
-    if (markerExists(job.confirmFile)) {
-      return await finishPublished("用户已在应用内确认发布（【我已发布】）");
+    // 用户在应用内点勾授权发布：代点一次发布按钮。
+    if (!confirmHandled && markerExists(job.confirmFile)) {
+      confirmHandled = true;
+      const r = await runOpencliRaw([
+        "browser", session, "eval", buildPublishClickScript(SELECTORS.publishButton.labels),
+      ]).catch(() => null);
+      if (r === "clicked") {
+        publishClickedAt = Date.now();
+        writeProgress("form_filled", "已按你的确认点击【发布】，等待发布结果…");
+      } else {
+        writeProgress(
+          "form_filled",
+          `未能自动点击发布按钮（${r === "ambiguous" ? "匹配到多个候选" : "未找到可点击的按钮"}），请人工在页面点击【发布】`,
+        );
+      }
+    }
+    // 代点后 90s 仍无成功信号：提醒检查页面（校验提示/二次弹窗），人工点击仍被检测兜底。
+    if (publishClickedAt && !slowWarned && Date.now() - publishClickedAt > 90_000) {
+      slowWarned = true;
+      writeProgress(
+        "form_filled",
+        "点击发布已超过 90 秒未检测到成功，请检查页面是否有校验提示或确认弹窗；可人工在页面点击【发布】",
+      );
     }
     // 一次 tab list 同时判活与取当前 URL（get url 会为无活页会话创建幽灵页，不用）。
     const tabsRes = await runOpencli(["browser", session, "tab", "list"]).catch(() => null);

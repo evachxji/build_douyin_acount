@@ -22,18 +22,25 @@ use crate::domain::task::AgentTask;
 /// 1. sidecar 在用户已登录的 Chrome 中新开上传页标签，自动把视频文件注入页面
 ///    file input（opencli upload，底层 CDP DOM.setFileInputFiles）；注入失败时
 ///    回退人工选择（waiting_for_file 阶段，前端弹窗展示路径）；
-/// 2. 上传/转码完成后 sidecar 自动填写标题/文案/话题并停在【发布】按钮前
-///    （WAITING_FOR_HUMAN）；
-/// 3. 用户核对后在浏览器中本人点击发布，再点应用内【我已发布】（写入 confirm 标记），
-///    本 Agent 据此标记资产 PUBLISHED。
+/// 2. 上传/转码完成后 sidecar 自动填写标题/文案/话题/定时/AI 封面并停在
+///    【发布】按钮前（form_filled；任务保持 RUNNING，payload stage=form_ready）；
+/// 3. 用户在应用侧栏点勾授权（写 confirm 标记），sidecar 据此代点一次发布按钮；
+///    用户亦可自行在页面点击发布。「发布已提交」信号（页面跳转/成功提示）命中后
+///    本 Agent 标记资产 PUBLISHED 并直接登记发布日历。
+/// 4. 多个发布任务可并行：sidecar 会话与 progress/cancel/confirm 标记文件均按
+///    draft_id 隔离；定时时间计算把其他活跃任务已选定的时刻计入占位，
+///    按三层覆盖策略顺延，不与进行中的发布撞同一时段。
 ///
-/// 【安全红线】本 Agent 与 sidecar 永不点击最终发布按钮；发布完成状态只由
-/// 显式「发布成功」提示或用户本人确认产生。
+/// 【安全红线】发布按钮的点击只能由用户在应用内对单个任务显式点勾触发
+/// （sidecar 代点一次，无自动/定时/批量路径）；发布完成状态只由「发布成功」
+/// 信号（页面跳转/成功提示，被动检测）产生；识别不到发布按钮元素必须停止
+/// 并提示人工，不得盲目操作。
 ///
 /// 【僵尸恢复】sidecar 每 5s 心跳重写进度文件；进程死亡（如随应用重启被杀）则
 /// 文件 mtime 冻结。transient 态（browser_started/uploading/waiting_for_file）
 /// 超过阈值未更新即重拉 sidecar（同名会话先清理旧标签页），最多 2 次后取消任务。
-/// form_filled 不做此判定：那是人工等待态，确认/取消走标记文件，不依赖 sidecar 存活。
+/// form_filled 同样判定但不重拉（重拉会重新上传填表）：点勾代点依赖 sidecar
+/// 存活，冻结直接取消任务并提示用户核实抖音后台状态。
 pub struct PublisherAgent {
     node: String,
     script: PathBuf,
@@ -76,7 +83,9 @@ enum SidecarState {
     /// 自动上传失败的兜底态：等待用户手动选择文件，携带 sidecar 提示消息。
     WaitingForFile(String),
     Uploading,
-    FormFilled,
+    /// 表单已填完、停在发布前：携带 sidecar 进度消息（透传侧栏行内展示，
+    /// 含点勾代点后的结果/失败提醒）。
+    FormFilled(String),
     Published(Option<PostCapture>),
     BrowserClosed,
     Cancelled,
@@ -117,7 +126,9 @@ fn read_progress(path: &Path) -> Result<SidecarState, DomainError> {
             v["message"].as_str().unwrap_or("").to_string(),
         ),
         "uploading" => SidecarState::Uploading,
-        "form_filled" => SidecarState::FormFilled,
+        "form_filled" => SidecarState::FormFilled(
+            v["message"].as_str().unwrap_or("").to_string(),
+        ),
         "published" => SidecarState::Published(parse_post_capture(&v)),
         "browser_closed" => SidecarState::BrowserClosed,
         "cancelled" => SidecarState::Cancelled,
@@ -172,7 +183,7 @@ pub fn request_cancel(store: &crate::media::MediaStore, draft_id: i64) -> Result
     write_marker(store, "cancel", draft_id)
 }
 
-/// 用户确认已在浏览器中本人点击发布：写 confirm 标记，Agent 据此收尾。
+/// 用户在应用侧栏点勾授权发布：写 confirm 标记，sidecar 据此代点一次发布按钮。
 pub fn request_confirm(store: &crate::media::MediaStore, draft_id: i64) -> Result<(), DomainError> {
     write_marker(store, "confirm", draft_id)
 }
@@ -280,6 +291,7 @@ pub fn pick_schedule_time(
 
 fn spawn_sidecar(
     ctx: &AgentContext,
+    task_id: i64,
     draft_id: i64,
     asset: &crate::domain::asset::VideoAsset,
     draft: &crate::domain::draft::PublishDraft,
@@ -295,8 +307,29 @@ fn spawn_sidecar(
     for (d, m) in DouyinPostsRepo::new(ctx.db).list_day_video_minutes()? {
         day_minutes.entry(d).or_default().push(m);
     }
+    // 并发适配：其他活跃发布任务已选定的定时时刻计入占位（排除本任务——僵尸
+    // 重拉时自己的 payload 已有旧值），后续任务按三层覆盖策略顺延，不与进行中的
+    // 发布撞同一时段。任务 finalize 前其定时不在 douyin_posts 日历里，必须在此补位。
+    for s in TasksRepo::new(ctx.db).list_active_schedule_times(task_id)? {
+        if let Some(ts) = parse_local_ts(&s) {
+            if let Some(ndt) = Local.timestamp_opt(ts, 0).single().map(|d| d.naive_local()) {
+                day_minutes
+                    .entry(ndt.date())
+                    .or_default()
+                    .push(i64::from(ndt.num_seconds_from_midnight() / 60));
+            }
+        }
+    }
     let now = Local::now();
     let schedule_time = pick_schedule_time(&day_minutes, now.naive_local(), now.timestamp_subsec_nanos());
+    // 名称与定时时刻写入任务 payload，侧栏发布列表据此展示（首轮 spawn 后即可见）。
+    TasksRepo::new(ctx.db).update_payload(
+        task_id,
+        json!({
+            "title": draft.title,
+            "schedule_time": schedule_time.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
+        }),
+    )?;
     let job = json!({
         "draftId": draft_id,
         "videoPath": asset.file_path,
@@ -403,25 +436,6 @@ fn parse_local_ts(s: &str) -> Option<i64> {
     Local.from_local_datetime(&ndt).single().map(|dt| dt.timestamp())
 }
 
-fn waiting_json(
-    stage: &str,
-    draft_id: i64,
-    asset_id: i64,
-    path: Option<&str>,
-    message: &str,
-) -> AgentOutcome {
-    let mut payload = json!({
-        "stage": stage,
-        "draft_id": draft_id,
-        "asset_id": asset_id,
-        "message": message,
-    });
-    if let Some(p) = path {
-        payload["path"] = json!(p);
-    }
-    AgentOutcome::WaitingForHuman(payload)
-}
-
 impl Agent for PublisherAgent {
     fn name(&self) -> &'static str {
         "publisher"
@@ -447,7 +461,7 @@ impl Agent for PublisherAgent {
 
         // 首次执行：sidecar 尚未启动则拉起。
         if state == SidecarState::Missing {
-            spawn_sidecar(ctx, draft_id, &asset, &draft, self)?;
+            spawn_sidecar(ctx, task.id, draft_id, &asset, &draft, self)?;
             state = SidecarState::BrowserStarted;
         }
 
@@ -471,8 +485,21 @@ impl Agent for PublisherAgent {
             }
             TasksRepo::new(ctx.db)
                 .update_payload(task.id, json!({ "respawns": respawns + 1 }))?;
-            spawn_sidecar(ctx, draft_id, &asset, &draft, self)?;
+            spawn_sidecar(ctx, task.id, draft_id, &asset, &draft, self)?;
             return Ok(AgentOutcome::Continue);
+        }
+
+        // form_filled 心跳判定：点勾代点依赖 sidecar 存活，冻结视为进程已死。
+        // 不重拉（重拉会重新上传填表、且用户可能已在页面手动发布）——直接取消
+        // 并提示核实抖音后台状态，素材保持 SELECTED 可重新发起。
+        if matches!(state, SidecarState::FormFilled(_))
+            && progress_stale(&progress_file, self.stale_after)
+        {
+            return Ok(AgentOutcome::Cancelled(json!({
+                "draft_id": draft_id,
+                "asset_id": asset_id,
+                "reason": "发布 sidecar 已失联（可能随应用重启终止）。如刚已确认发布，请先到抖音后台核实作品状态；未发布请重新点击【准备发布】。",
+            })));
         }
 
         // 中间状态立即返回 Continue：任务保持 RUNNING，由 worker 每 2 秒重新领取轮询，
@@ -513,7 +540,7 @@ impl Agent for PublisherAgent {
                 )?;
                 Ok(AgentOutcome::Continue)
             }
-            SidecarState::FormFilled => {
+            SidecarState::FormFilled(message) => {
                 // 幂等：仅 DRAFT -> FILLED。
                 let current = DraftsRepo::new(ctx.db).get(draft_id)?.ok_or_else(|| {
                     DomainError::InvalidData(format!("draft {draft_id} not found"))
@@ -521,24 +548,14 @@ impl Agent for PublisherAgent {
                 if current.status == DraftStatus::Draft {
                     DraftsRepo::new(ctx.db).update_status(draft_id, DraftStatus::Filled)?;
                 }
-                // 用户已点【我已发布】：人工确认发布完成（sidecar 捕获缺失，走 draft/job 兜底值）。
-                if confirm_path(&ctx.store, draft_id).exists() {
-                    finalize_published(ctx, draft_id, asset_id, None)?;
-                    Ok(AgentOutcome::Succeeded(json!({
-                        "draft_id": draft_id,
-                        "asset_id": asset_id,
-                        "published": true,
-                        "confirmed_by_human": true,
-                    })))
-                } else {
-                    Ok(waiting_json(
-                        "form_ready",
-                        draft_id,
-                        asset_id,
-                        None,
-                        "标题/文案/话题已填写完成，标签页保持打开。请核对内容后，由你本人点击页面上的【发布】按钮；发布成功后程序会自动检测并同步日历（若长时间未自动确认，可点【我已发布】兜底）。",
-                    ))
-                }
+                // 任务保持 RUNNING 等待用户在侧栏点勾（confirm 标记由 sidecar 响应，
+                // 代点一次发布按钮）或自行在页面发布；sidecar 进度消息透传到行内展示
+                // （含「已按你的确认点击发布」/点击失败提醒）。
+                TasksRepo::new(ctx.db).update_payload(
+                    task.id,
+                    json!({ "stage": "form_ready", "message": message }),
+                )?;
+                Ok(AgentOutcome::Continue)
             }
             // browser_started / uploading：继续等待下一轮轮询
             SidecarState::BrowserStarted | SidecarState::Uploading | SidecarState::Missing => {

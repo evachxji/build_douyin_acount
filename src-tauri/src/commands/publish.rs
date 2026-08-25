@@ -38,14 +38,14 @@ pub fn prepare_publish(
         let draft_id = drafts.create(NewDraft {
             asset_id,
             style_id: copy.style_id,
-            title: Some(copy.title),
+            title: Some(copy.title.clone()),
             body: Some(copy.body),
             hashtags: copy.hashtags,
         })?;
         let task_id = TasksRepo::new(db).enqueue(
             "publisher",
             "prepare_publish",
-            json!({ "draft_id": draft_id, "asset_id": asset_id }),
+            json!({ "draft_id": draft_id, "asset_id": asset_id, "title": copy.title }),
             true,
         )?;
         let draft = drafts
@@ -86,14 +86,14 @@ pub fn prepare_publish(
     let draft_id = drafts.create(NewDraft {
         asset_id,
         style_id: None,
-        title: Some(title),
+        title: Some(title.clone()),
         body: Some(body),
         hashtags: tags,
     })?;
     let task_id = TasksRepo::new(db).enqueue(
         "publisher",
         "prepare_publish",
-        json!({ "draft_id": draft_id, "asset_id": asset_id }),
+        json!({ "draft_id": draft_id, "asset_id": asset_id, "title": title }),
         true,
     )?;
     let draft = drafts
@@ -108,26 +108,11 @@ pub fn list_drafts(state: State<AppState>) -> Result<Vec<crate::domain::draft::P
     DraftsRepo::new(&state.db).list().map_err(ApiError::from)
 }
 
-/// 用户确认已在浏览器中本人点击发布：写入 confirm 标记并放行任务收尾。
+/// 用户在侧栏点勾授权发布：写入 confirm 标记，sidecar 轮询到后据此在页面
+/// 代点一次发布按钮（任务全程保持 RUNNING，无需放行）。
 #[tauri::command]
 pub fn publish_confirmed(state: State<AppState>, draft_id: i64) -> Result<(), ApiError> {
-    crate::agents::publisher::request_confirm(&state.store, draft_id).map_err(ApiError::from)?;
-    resume_publisher_task(&state, draft_id)
-}
-
-fn resume_publisher_task(state: &State<AppState>, draft_id: i64) -> Result<(), ApiError> {
-    let repo = TasksRepo::new(&state.db);
-    let task = repo
-        .list(Some(crate::domain::task::TaskStatus::WaitingForHuman))
-        .map_err(ApiError::from)?
-        .into_iter()
-        .find(|t| t.agent_name == "publisher" && t.payload["draft_id"] == draft_id)
-        .ok_or_else(|| {
-            ApiError::from(DomainError::InvalidData(format!(
-                "未找到 draft {draft_id} 的等待人工任务"
-            )))
-        })?;
-    repo.resume(task.id).map_err(ApiError::from)
+    crate::agents::publisher::request_confirm(&state.store, draft_id).map_err(ApiError::from)
 }
 
 /// 把文本写入系统剪贴板（文件选择阶段自动复制视频路径，用户直接粘贴）。
