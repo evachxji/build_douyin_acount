@@ -81,7 +81,7 @@ export function TopBar({
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-panel px-4">
       <div className="flex items-baseline gap-2">
-        <h1 className="text-base font-bold tracking-wide text-paper">
+        <h1 className="whitespace-nowrap text-base font-bold tracking-wide text-paper">
           短视频素材运营台
         </h1>
       </div>
@@ -90,7 +90,7 @@ export function TopBar({
         value={filter.search ?? ""}
         onChange={(e) => void setFilter({ search: e.target.value })}
         placeholder="搜索标题 / 作者 / 摘要…"
-        className="ml-4 h-9 w-64 rounded border border-line bg-ink px-3 text-sm text-paper placeholder:text-mute/60 focus:border-accent/60 focus:outline-none"
+        className="ml-4 h-9 w-52 rounded border border-line bg-ink px-3 text-sm text-paper placeholder:text-mute/60 focus:border-accent/60 focus:outline-none"
       />
 
       <select
@@ -128,7 +128,7 @@ export function TopBar({
         role="switch"
         aria-checked={autoSync}
         onClick={() => void toggleAutoSync()}
-        className={`flex h-9 items-center gap-2 rounded border px-2.5 text-xs transition-colors ${
+        className={`flex h-9 items-center gap-2 whitespace-nowrap rounded border px-2.5 text-xs transition-colors ${
           autoSync
             ? "border-accent bg-accent/15 text-accent"
             : "border-line text-mute hover:border-accent/40 hover:text-paper"
@@ -159,7 +159,7 @@ export function TopBar({
       <button
         onClick={() => void handleCollect()}
         disabled={collecting || collectStarting}
-        className="h-9 rounded border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-accent enabled:bg-accent/10 enabled:text-accent enabled:hover:bg-accent/20"
+        className="h-9 whitespace-nowrap rounded border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-accent enabled:bg-accent/10 enabled:text-accent enabled:hover:bg-accent/20"
         title={
           collecting
             ? "采集任务执行中，完成后可再次发起"
@@ -171,14 +171,14 @@ export function TopBar({
       <button
         onClick={() => void handleAnalyze()}
         disabled={ids.size === 0 || analyzing}
-        className="h-9 rounded border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-accent enabled:bg-accent enabled:text-ink enabled:hover:brightness-110"
+        className="h-9 whitespace-nowrap rounded border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-accent enabled:bg-accent enabled:text-ink enabled:hover:brightness-110"
         title="对选中的素材排队执行 AI 分析"
       >
         {analyzing ? "排队中…" : `AI 分析${ids.size > 0 ? ` (${ids.size})` : ""}`}
       </button>
       <button
         onClick={() => setTaskOpen(!taskOpen)}
-        className={`relative h-9 rounded border px-3 text-sm transition-colors ${
+        className={`relative h-9 whitespace-nowrap rounded border px-3 text-sm transition-colors ${
           taskOpen
             ? "border-accent bg-accent/15 text-accent"
             : "border-line text-mute hover:border-accent/40 hover:text-paper"
