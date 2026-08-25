@@ -56,7 +56,8 @@ impl AppState {
     pub fn build_pipeline(&self) -> Result<AnalysisPipeline, DomainError> {
         let s = self.settings.read().expect("settings lock poisoned");
         let script = self.resolve_path(&s.whisper_script);
-        let whisper_model = s.whisper_model.clone();
+        // 已安装的模型传本地目录绝对路径（内置基座）；未安装/自定义值原样透传给 faster-whisper。
+        let whisper_model = crate::whisper_models::resolve_model_arg(&self.store, &s.whisper_model);
         // 与脚本一致：解释器路径也解析为绝对路径（应用进程 cwd 在 src-tauri 下，相对路径会找不到）。
         let python = self.resolve_path(&s.whisper_python).to_string_lossy().into_owned();
         let vision_model = s.vision_model.clone();

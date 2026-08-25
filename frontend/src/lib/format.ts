@@ -106,3 +106,16 @@ export function formatSyncAgo(v: string | null | undefined): string {
 export function cleanConditions(items: string[]): string[] {
   return items.map((s) => s.trim()).filter((s) => s.length > 0);
 }
+
+/** 字节数 -> 人类可读（GB 两位小数 / MB 一位小数）。 */
+export function formatBytes(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)} GB`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} MB`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
+/** 字节/秒 -> 人类可读速率。 */
+export function formatSpeed(bps: number): string {
+  return `${formatBytes(bps)}/s`;
+}

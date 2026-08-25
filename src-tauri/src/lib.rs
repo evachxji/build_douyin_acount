@@ -10,6 +10,7 @@ pub mod media;
 pub mod settings;
 pub mod state;
 pub mod util;
+pub mod whisper_models;
 
 use std::path::PathBuf;
 
@@ -129,6 +130,10 @@ pub fn run() {
             commands::settings::update_settings,
             commands::ollama::check_ollama,
             commands::ollama::start_ollama,
+            commands::whisper_models::list_whisper_models,
+            commands::whisper_models::start_whisper_download,
+            commands::whisper_models::cancel_whisper_download,
+            commands::whisper_models::delete_whisper_model,
         ])
         .setup(|app| {
             // 系统托盘：关窗仅隐藏到托盘，后台任务（分析/发布/巡检）继续运行；

@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api/client";
-import type { AppSettings } from "../../api/types";
+import type { AppSettings, WhisperModelInfo } from "../../api/types";
 import { cleanConditions } from "../../lib/format";
+import { WhisperModelDialog } from "./WhisperModelDialog";
 
 const EMPTY: AppSettings = {
   ollama_url: "",
@@ -90,6 +92,24 @@ export function SettingsDrawer({
 }) {
   const [settings, setSettings] = useState<AppSettings>(EMPTY);
   const [error, setError] = useState<string | null>(null);
+  const [whisperModels, setWhisperModels] = useState<WhisperModelInfo[]>([]);
+  const [whisperDialogFor, setWhisperDialogFor] = useState<string | null>(null);
+
+  const refreshWhisperModels = useCallback(async () => {
+    try {
+      setWhisperModels(await api.listWhisperModels());
+    } catch {
+      /* 读取失败保持旧状态，下一轮轮询重试 */
+    }
+  }, []);
+
+  // 抽屉打开期间 1.5s 轮询模型安装状态与下载进度（全库轮询架构，无 event 推送）。
+  useEffect(() => {
+    if (!open) return;
+    void refreshWhisperModels();
+    const t = setInterval(() => void refreshWhisperModels(), 1500);
+    return () => clearInterval(t);
+  }, [open, refreshWhisperModels]);
 
   useEffect(() => {
     if (open) {
@@ -102,6 +122,20 @@ export function SettingsDrawer({
 
   const set = (patch: Partial<AppSettings>) =>
     setSettings((s) => ({ ...s, ...patch }));
+
+  const deleteModel = async (name: string) => {
+    const ok = await ask(`确定删除模型 ${name} 吗？删除后需重新下载才能用于语音识别。`, {
+      title: "删除 Whisper 模型",
+      kind: "warning",
+    });
+    if (!ok) return;
+    try {
+      await api.deleteWhisperModel(name);
+      await refreshWhisperModels();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const save = async () => {
     try {
@@ -145,9 +179,96 @@ export function SettingsDrawer({
             <input className={field} value={settings.llm_model} onChange={(e) => set({ llm_model: e.target.value })} />
           </label>
           <label className="block">
-            <span className="text-xs text-mute">Whisper 模型</span>
-            <input className={field} value={settings.whisper_model} onChange={(e) => set({ whisper_model: e.target.value })} />
+            <span className="text-xs text-mute">Whisper 模型（语音识别）</span>
+            <select
+              className={field}
+              value={settings.whisper_model}
+              onChange={(e) => {
+                const name = e.target.value;
+                set({ whisper_model: name });
+                // 选中未安装模型时弹窗引导一键下载（内置模型库，不再依赖外部预装）。
+                const info = whisperModels.find((m) => m.name === name);
+                if (info && !info.installed) setWhisperDialogFor(name);
+              }}
+            >
+              {whisperModels.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.name}（约 {m.size_mb}MB · {m.vram_hint}）{m.installed ? " ✓已安装" : ""}
+                </option>
+              ))}
+              {!whisperModels.some((m) => m.name === settings.whisper_model) &&
+                settings.whisper_model !== "" && (
+                  <option value={settings.whisper_model}>自定义：{settings.whisper_model}</option>
+                )}
+            </select>
           </label>
+          {/* 内置模型库：安装状态总览 + 下载/删除管理（下载细节在弹窗中展示） */}
+          <div className="col-span-2 rounded border border-line p-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-mute">
+              Whisper 模型管理（内置模型库）
+            </p>
+            <div className="mt-2 space-y-2">
+              {whisperModels.map((m) => {
+                const d = m.download;
+                const active =
+                  d !== null && ["connecting", "downloading", "verifying"].includes(d.stage);
+                const pct =
+                  active && d && d.total_bytes > 0
+                    ? Math.min(100, Math.floor((d.total_downloaded / d.total_bytes) * 100))
+                    : 0;
+                return (
+                  <div key={m.name} className="flex items-center justify-between gap-2 text-xs">
+                    <div className="min-w-0">
+                      <span className="text-paper">{m.name}</span>
+                      <span className="ml-2 text-mute">
+                        约 {m.size_mb}MB · {m.vram_hint}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {m.installed ? (
+                        <span className="text-emerald-400">已安装</span>
+                      ) : active ? (
+                        <span className="text-amber-400">下载中 {pct}%</span>
+                      ) : d?.stage === "error" ? (
+                        <span className="text-bad">下载失败</span>
+                      ) : d?.stage === "cancelled" || d?.stage === "interrupted" ? (
+                        <span className="text-mute">已中断</span>
+                      ) : (
+                        <span className="text-mute">未安装</span>
+                      )}
+                      {active ? (
+                        <button
+                          type="button"
+                          onClick={() => setWhisperDialogFor(m.name)}
+                          className="h-7 rounded border border-line px-3 text-mute hover:text-paper"
+                        >
+                          查看进度
+                        </button>
+                      ) : !m.installed ? (
+                        <button
+                          type="button"
+                          onClick={() => setWhisperDialogFor(m.name)}
+                          className="h-7 rounded border border-accent px-3 text-accent hover:bg-accent/10"
+                        >
+                          {d && (d.stage === "cancelled" || d.stage === "interrupted")
+                            ? "继续下载"
+                            : "下载"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void deleteModel(m.name)}
+                          className="h-7 rounded border border-line px-3 text-mute hover:text-bad"
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
           <label className="block">
             <span className="text-xs text-mute">质量分保留线（0-100）</span>
             <input
@@ -248,6 +369,14 @@ export function SettingsDrawer({
           </button>
         </div>
       </div>
+      {whisperDialogFor && (
+        <WhisperModelDialog
+          modelName={whisperDialogFor}
+          info={whisperModels.find((m) => m.name === whisperDialogFor) ?? null}
+          onClose={() => setWhisperDialogFor(null)}
+          onInstalled={(name) => set({ whisper_model: name })}
+        />
+      )}
     </div>
   );
 }

@@ -122,6 +122,47 @@ export interface AppSettings {
 
 export type DraftStatus = "DRAFT" | "FILLED" | "PUBLISHED" | "CANCELLED";
 
+
+/** Whisper 模型下载进度（后端 progress 文件原样透传；interrupted 由后端按心跳判定后标注）。 */
+export interface WhisperDownloadProgress {
+  model: string;
+  stage:
+    | "connecting"
+    | "downloading"
+    | "verifying"
+    | "done"
+    | "error"
+    | "cancelled"
+    | "interrupted";
+  route: string; // official / mirror
+  current_file: string;
+  file_index: number;
+  file_count: number;
+  file_downloaded: number;
+  file_total: number;
+  total_downloaded: number;
+  total_bytes: number;
+  speed_bps: number;
+  url: string;
+  dest: string;
+  message: string;
+  updated_at: number;
+}
+
+/** Whisper 模型规格与本地安装状态（storage/models/whisper/<名称>/）。 */
+export interface WhisperModelInfo {
+  name: string;
+  size_mb: number;
+  vram_hint: string;
+  file_count: number;
+  installed: boolean;
+  dir: string;
+  download: WhisperDownloadProgress | null;
+}
+
+/** 下载路由：auto=官方优先、失败/过慢自动切国内镜像。 */
+export type WhisperDownloadRoute = "auto" | "official" | "mirror";
+
 export interface PublishDraft {
   id: number;
   asset_id: number;

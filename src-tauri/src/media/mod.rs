@@ -47,6 +47,15 @@ impl MediaStore {
         self.root.join("db")
     }
 
+    pub fn tools_dir(&self) -> PathBuf {
+        self.root.join("tools")
+    }
+
+    /// Whisper 内置模型根目录（`models/whisper/<模型名>/`，由应用自行下载管理）。
+    pub fn models_dir(&self) -> PathBuf {
+        self.root.join("models").join("whisper")
+    }
+
     /// 创建全部子目录（幂等）。
     pub fn ensure_dirs(&self) -> Result<(), DomainError> {
         for dir in [
@@ -57,6 +66,8 @@ impl MediaStore {
             self.audio_dir().as_path(),
             self.logs_dir().as_path(),
             self.db_dir().as_path(),
+            self.tools_dir().as_path(),
+            self.models_dir().as_path(),
         ] {
             std::fs::create_dir_all(dir)?;
         }

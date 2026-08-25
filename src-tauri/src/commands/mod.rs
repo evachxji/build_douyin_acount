@@ -8,3 +8,4 @@ pub mod ollama;
 pub mod publish;
 pub mod settings;
 pub mod tasks;
+pub mod whisper_models;

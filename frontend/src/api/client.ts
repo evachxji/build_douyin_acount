@@ -11,6 +11,8 @@ import type {
   PublishDraft,
   TaskLog,
   VideoAsset,
+  WhisperDownloadRoute,
+  WhisperModelInfo,
 } from "./types";
 
 /** 后端 DomainError 统一转成的可读错误。 */
@@ -94,4 +96,11 @@ export const api = {
   getCopy: (assetId: number) => call<ContentCopy | null>("get_copy", { assetId }),
   checkOllama: () => call<boolean>("check_ollama"),
   startOllama: () => call<void>("start_ollama"),
+  listWhisperModels: () => call<WhisperModelInfo[]>("list_whisper_models"),
+  startWhisperDownload: (model: string, route: WhisperDownloadRoute) =>
+    call<void>("start_whisper_download", { model, route }),
+  cancelWhisperDownload: (model: string) =>
+    call<void>("cancel_whisper_download", { model }),
+  deleteWhisperModel: (model: string) =>
+    call<void>("delete_whisper_model", { model }),
 };
