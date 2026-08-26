@@ -13,11 +13,14 @@ export function PublishProgressList() {
   // 已点勾授权的任务 id：行内转「发布提交中」防重复点击，任务终态离开列表后清理。
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
 
-  const publishing = tasks.filter(
-    (t) =>
-      t.agent_name === "publisher" &&
-      (t.status === "PENDING" || t.status === "RUNNING"),
-  );
+  // tasks 为创建时间倒序（最新在前）；发布中列表反转为正序——最新发起的显示在最下面。
+  const publishing = tasks
+    .filter(
+      (t) =>
+        t.agent_name === "publisher" &&
+        (t.status === "PENDING" || t.status === "RUNNING"),
+    )
+    .reverse();
 
   useEffect(() => {
     setBusyIds((prev) => {
