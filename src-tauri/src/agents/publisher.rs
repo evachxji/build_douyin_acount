@@ -377,7 +377,8 @@ fn finalize_published(
 
 /// 发布完成后直接把作品登记进 douyin_posts，发布日历即时更新（不再跑整轮 douyin_sync）。
 /// 字段优先取 sidecar 捕获的页面实际值（用户可能手改过标题/定时），缺省回退 draft/job.json；
-/// 作品 id 缺失时用 local-draft-<draft_id> 占位，下次整轮 sync 拉到真实行后按标题+日期清理。
+/// 作品 id 缺失时用 local-draft-<draft_id> 占位，下次整轮 sync 拉到真实行后清理
+/// （create_time 精确相等，或同日+占位标题前缀——见 delete_local_placeholders）。
 fn register_local_post(
     ctx: &AgentContext,
     draft_id: i64,

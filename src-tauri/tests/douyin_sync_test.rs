@@ -272,7 +272,7 @@ fn douyin_sync_repo_violation_cleared_when_platform_lifts_it() {
 #[test]
 fn douyin_sync_repo_deletes_local_placeholders_same_title_same_day() {
     // publisher 发布登记的占位行（钩子未捕获到真实 aweme_id 的回退产物）：
-    // 真实作品入库后，同标题同日的 local-draft-* 占位行必须被清理；不同日期的保留。
+    // 真实作品入库后，匹配的 local-draft-* 占位行必须被清理；不同日期且标题无关联的保留。
     let dir = tempfile::tempdir().expect("tempdir");
     let db = Database::open(&dir.path().join("test.db")).expect("db");
     let repo = DouyinPostsRepo::new(&db);
@@ -299,6 +299,7 @@ fn douyin_sync_repo_deletes_local_placeholders_same_title_same_day() {
     repo
         .upsert(&NewDouyinPost {
             aweme_id: "local-draft-8".to_string(),
+            title: Some("别的标题".to_string()),
             create_time: 4102444800 + 86400 * 3,
             ..base.clone()
         })
@@ -315,7 +316,7 @@ fn douyin_sync_repo_deletes_local_placeholders_same_title_same_day() {
         .expect("cleanup");
     assert!(
         repo.get_by_aweme("local-draft-7").expect("get").is_none(),
-        "同标题同日的占位行应被清理"
+        "匹配的占位行应被清理"
     );
     assert!(
         repo.get_by_aweme("dy_real_1").expect("get").is_some(),
@@ -323,7 +324,99 @@ fn douyin_sync_repo_deletes_local_placeholders_same_title_same_day() {
     );
     assert!(
         repo.get_by_aweme("local-draft-8").expect("get").is_some(),
-        "不同日期的占位行不受影响"
+        "不同日期且标题无关联的占位行不受影响"
+    );
+}
+
+#[test]
+fn douyin_sync_repo_deletes_placeholder_with_prefix_title() {
+    // 2026-08-26 实证 bug：占位 title 是 draft 标题行，真实行 title 是抖音完整文案
+    // （标题+正文+话题），旧条件「标题完整相等」永远匹配不上，幽灵占位与真实行在日历并存。
+    // 新条件 B：同日 + 占位标题是真实标题前缀（create_time 秒级不同，条件 A 不命中）。
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = Database::open(&dir.path().join("test.db")).expect("db");
+    let repo = DouyinPostsRepo::new(&db);
+    let placeholder = NewDouyinPost {
+        aweme_id: "local-draft-81".to_string(),
+        title: Some("风与浪之间，藏着这样的仙境？🍃".to_string()),
+        cover_path: None,
+        cover_url: None,
+        status: "scheduled".to_string(),
+        play_count: 0,
+        digg_count: 0,
+        comment_count: 0,
+        share_count: 0,
+        completion_rate: None,
+        bounce_rate_2s: None,
+        violation_status: None,
+        violation_text: None,
+        violation_brief: None,
+        violation_url: None,
+        create_time: 4102444800,
+        public_time: 0,
+    };
+    repo.upsert(&placeholder).expect("placeholder");
+    // 同日另一条标题无关的占位：不能被前缀匹配误伤。
+    repo
+        .upsert(&NewDouyinPost {
+            aweme_id: "local-draft-82".to_string(),
+            title: Some("完全不同的话题".to_string()),
+            create_time: 4102444800 + 3600,
+            ..placeholder.clone()
+        })
+        .expect("unrelated placeholder");
+
+    let real_title = "风与浪之间，藏着这样的仙境？🍃 这不是滤镜，是真实存在的山水！#治愈系风景";
+    repo
+        .delete_local_placeholders(real_title, 4102444800 + 1800)
+        .expect("cleanup");
+
+    assert!(
+        repo.get_by_aweme("local-draft-81").expect("get").is_none(),
+        "占位标题是真实标题前缀且同日，必须被清理"
+    );
+    assert!(
+        repo.get_by_aweme("local-draft-82").expect("get").is_some(),
+        "同日但标题无关联的占位行不能被误伤"
+    );
+}
+
+#[test]
+fn douyin_sync_repo_deletes_placeholder_same_create_time_different_title() {
+    // 条件 A：create_time 精确相等即清理（定时作品占位与真实行同为定时发布时间，
+    // 精确到分钟）——即使用户在发布页把标题改得与 draft 完全不同。
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = Database::open(&dir.path().join("test.db")).expect("db");
+    let repo = DouyinPostsRepo::new(&db);
+    repo
+        .upsert(&NewDouyinPost {
+            aweme_id: "local-draft-90".to_string(),
+            title: Some("draft 原标题".to_string()),
+            cover_path: None,
+            cover_url: None,
+            status: "scheduled".to_string(),
+            play_count: 0,
+            digg_count: 0,
+            comment_count: 0,
+            share_count: 0,
+            completion_rate: None,
+            bounce_rate_2s: None,
+            violation_status: None,
+            violation_text: None,
+            violation_brief: None,
+            violation_url: None,
+            create_time: 4102444800,
+            public_time: 0,
+        })
+        .expect("placeholder");
+
+    repo
+        .delete_local_placeholders("用户在页面改成的全新标题", 4102444800)
+        .expect("cleanup");
+
+    assert!(
+        repo.get_by_aweme("local-draft-90").expect("get").is_none(),
+        "create_time 精确相等即清理，标题不同不影响"
     );
 }
 

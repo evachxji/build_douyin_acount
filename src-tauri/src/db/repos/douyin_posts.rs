@@ -166,19 +166,30 @@ impl<'a> DouyinPostsRepo<'a> {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// 清理发布占位行：真实作品入库后，删除标题相同且发布日期相同的 local-draft-* 占位行
+    /// 清理发布占位行：真实作品入库后，删除对应的 local-draft-* 占位行
     /// （publisher 发布登记时钩子未捕获到真实 aweme_id 的回退产物）。
-    /// 仅匹配 local- 前缀，真实行永不误删；占位行误删的代价也只是日历以真实行为准。
+    /// 匹配条件（任一命中）：
+    ///   A. create_time 精确相等——定时作品的占位与真实行同为定时发布时间，精确到分钟；
+    ///   B. 发布日期相同且占位标题是真实标题前缀——占位 title 是 draft/页面标题行，
+    ///      真实行 title 是抖音完整文案（标题+正文+话题），完整相等永远匹配不上（旧条件
+    ///      「标题相同」的 bug：占位 title=「风与浪之间…🍃」，真实 title=完整文案，幽灵占位永存）。
+    /// 仅匹配 local- 前缀，真实行永不误删；占位行误删的代价只是下轮 sync 拉到真实行前暂时不显示。
     pub fn delete_local_placeholders(
         &self,
         title: &str,
         create_time: i64,
     ) -> Result<usize, DomainError> {
         let conn = self.db.conn();
+        // instr(?1, title) = 1：占位标题是真实标题前缀（不用 GLOB——标题含 * ? [ 会被当通配符）。
+        // length(title) > 0：空串/NULL 标题不许走前缀匹配（否则同日全清）。
         let n = conn.execute(
             "DELETE FROM douyin_posts
-             WHERE aweme_id LIKE 'local-draft-%' AND title = ?1
-               AND date(create_time, 'unixepoch', 'localtime') = date(?2, 'unixepoch', 'localtime')",
+             WHERE aweme_id LIKE 'local-draft-%'
+               AND (
+                 create_time = ?2
+                 OR (date(create_time, 'unixepoch', 'localtime') = date(?2, 'unixepoch', 'localtime')
+                     AND length(title) > 0 AND instr(?1, title) = 1)
+               )",
             params![title, create_time],
         )?;
         Ok(n)

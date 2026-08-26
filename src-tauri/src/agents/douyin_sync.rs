@@ -164,7 +164,8 @@ pub(crate) fn import_new_posts(ctx: &AgentContext, task_id: i64) -> Result<(i64,
             }
         };
         repo.upsert(&post)?;
-        // 真实行入库后清理同标题同日的发布占位行（local-draft-*，publisher 登记的回退产物）。
+        // 真实行入库后清理对应的发布占位行（local-draft-*，publisher 登记的回退产物；
+        // 匹配条件见 delete_local_placeholders：create_time 精确相等，或同日+标题前缀）。
         if let Some(t) = &post.title {
             repo.delete_local_placeholders(t, post.create_time)?;
         }
