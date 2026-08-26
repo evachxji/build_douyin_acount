@@ -9,8 +9,8 @@
 //!   WHISPER_SCRIPT 默认 scripts/whisper-server/whisper_transcribe.py
 //!   WHISPER_MODEL  默认 base
 //!   VISION_PROVIDER / LLM_PROVIDER  默认 ollama；设 openai 走云端 OpenAI 兼容接口
-//!   OPENAI_BASE_URL 默认 https://api.kimi.com/coding/v1
-//!   OPENAI_API_KEY  云端必填
+//!   OPENAI_VISION_BASE_URL / OPENAI_LLM_BASE_URL  默认回退 OPENAI_BASE_URL 或 https://api.kimi.com/coding/v1
+//!   OPENAI_VISION_API_KEY / OPENAI_LLM_API_KEY  默认回退 OPENAI_API_KEY；云端必填
 //!   OPENAI_VISION_MODEL / OPENAI_LLM_MODEL  默认 k3-256k
 
 use std::path::{Path, PathBuf};
@@ -50,8 +50,13 @@ fn main() {
     let llm_model = env_or("LLM_MODEL", "qwen2.5:7b");
     let vision_provider = env_or("VISION_PROVIDER", "ollama");
     let llm_provider = env_or("LLM_PROVIDER", "ollama");
-    let openai_base_url = env_or("OPENAI_BASE_URL", "https://api.kimi.com/coding/v1");
-    let openai_api_key = env_or("OPENAI_API_KEY", "");
+    // 视觉/文本独立的云端配置；未单独设置时回退到共用的 OPENAI_BASE_URL/OPENAI_API_KEY。
+    let shared_base = env_or("OPENAI_BASE_URL", "https://api.kimi.com/coding/v1");
+    let shared_key = env_or("OPENAI_API_KEY", "");
+    let openai_vision_base_url = env_or("OPENAI_VISION_BASE_URL", &shared_base);
+    let openai_vision_api_key = env_or("OPENAI_VISION_API_KEY", &shared_key);
+    let openai_llm_base_url = env_or("OPENAI_LLM_BASE_URL", &shared_base);
+    let openai_llm_api_key = env_or("OPENAI_LLM_API_KEY", &shared_key);
     let openai_vision_model = env_or("OPENAI_VISION_MODEL", "k3-256k");
     let openai_llm_model = env_or("OPENAI_LLM_MODEL", "k3-256k");
 
@@ -60,7 +65,7 @@ fn main() {
 
     let vision: Arc<dyn Vision> = if vision_provider == "openai" {
         Arc::new(OpenAiVision {
-            client: OpenAiClient::new(&openai_base_url, &openai_api_key).expect("vision client"),
+            client: OpenAiClient::new(&openai_vision_base_url, &openai_vision_api_key).expect("vision client"),
             model: openai_vision_model,
         })
     } else {
@@ -71,7 +76,7 @@ fn main() {
     };
     let llm: Arc<dyn Llm> = if llm_provider == "openai" {
         Arc::new(OpenAiLlm {
-            client: OpenAiClient::new(&openai_base_url, &openai_api_key).expect("llm client"),
+            client: OpenAiClient::new(&openai_llm_base_url, &openai_llm_api_key).expect("llm client"),
             model: openai_llm_model,
         })
     } else {

@@ -83,7 +83,7 @@ export function WhisperModelDialog({
   const value = "min-w-0 break-all text-right text-paper";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <div className="w-[520px] rounded-xl border border-accent/40 bg-panel p-6 shadow-2xl">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-paper">

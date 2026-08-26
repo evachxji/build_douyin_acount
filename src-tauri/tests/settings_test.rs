@@ -29,8 +29,10 @@ fn settings_defaults_when_nothing_stored() {
     assert_eq!(settings.max_likes, 1_000_000);
     assert_eq!(settings.vision_provider, "ollama");
     assert_eq!(settings.llm_provider, "ollama");
-    assert_eq!(settings.openai_base_url, "https://api.kimi.com/coding/v1");
-    assert!(settings.openai_api_key.is_empty());
+    assert_eq!(settings.openai_vision_base_url, "https://api.kimi.com/coding/v1");
+    assert_eq!(settings.openai_llm_base_url, "https://api.kimi.com/coding/v1");
+    assert!(settings.openai_vision_api_key.is_empty());
+    assert!(settings.openai_llm_api_key.is_empty());
     assert_eq!(settings.openai_vision_model, "k3-256k");
     assert_eq!(settings.openai_llm_model, "k3-256k");
 }
@@ -62,9 +64,11 @@ fn settings_roundtrip_persists_fields() {
         condition_basis: HashMap::new(),
         vision_provider: "openai".to_string(),
         llm_provider: "ollama".to_string(),
-        openai_base_url: "https://api.moonshot.cn/v1".to_string(),
-        openai_api_key: "sk-test-key".to_string(),
+        openai_vision_base_url: "https://api.kimi.com/coding/v1".to_string(),
+        openai_vision_api_key: "sk-vision-key".to_string(),
         openai_vision_model: "kimi-k2.5".to_string(),
+        openai_llm_base_url: "https://api.moonshot.cn/v1".to_string(),
+        openai_llm_api_key: "sk-llm-key".to_string(),
         openai_llm_model: "kimi-k2.6".to_string(),
         publish_declaration: false,
     };
@@ -118,13 +122,40 @@ fn settings_load_legacy_json_without_conditions_keeps_defaults() {
     assert_eq!(loaded.vision_provider, "ollama", "missing vision_provider falls back to local");
     assert_eq!(loaded.llm_provider, "ollama", "missing llm_provider falls back to local");
     assert_eq!(
-        loaded.openai_base_url, "https://api.kimi.com/coding/v1",
-        "missing openai_base_url falls back to default"
+        loaded.openai_vision_base_url, "https://api.kimi.com/coding/v1",
+        "missing openai_vision_base_url falls back to default"
     );
-    assert!(loaded.openai_api_key.is_empty(), "missing openai_api_key defaults to empty");
+    assert_eq!(loaded.openai_llm_base_url, "https://api.kimi.com/coding/v1");
+    assert!(loaded.openai_vision_api_key.is_empty(), "missing openai_vision_api_key defaults to empty");
+    assert!(loaded.openai_llm_api_key.is_empty());
     assert_eq!(loaded.openai_vision_model, "k3-256k");
     assert_eq!(loaded.openai_llm_model, "k3-256k");
     assert!(loaded.publish_declaration, "missing publish_declaration defaults to true（保持自动声明的历史行为）");
+}
+
+#[test]
+fn settings_load_legacy_shared_openai_fields_map_to_both() {
+    // 旧版设置 JSON 里 vision/llm 共用 openai_base_url/openai_api_key：
+    // 经 serde alias 迁移后，两组独立字段都应读到旧值。
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = Database::open(&dir.path().join("test.db")).expect("open db");
+    let legacy = r#"{"ollama_url":"http://localhost:11434","vision_model":"qwen2.5vl:7b","llm_model":"qwen2.5:7b","whisper_python":"p","whisper_script":"s","whisper_model":"base","quality_min_keep":60,"node_bin":"node","publisher_script":"ps","publisher_browser":"chrome","collector_script":"cs","account_style":"治愈","batch_size":20,"tiktok_ratio":0.3,"instagram_ratio":0.7,"max_likes":1000000,"vision_provider":"openai","llm_provider":"openai","openai_base_url":"https://api.kimi.com/coding/v1","openai_api_key":"sk-shared","openai_vision_model":"k3-256k","openai_llm_model":"k3-256k"}"#;
+    db.conn()
+        .execute("INSERT INTO app_settings (key, value) VALUES ('app', ?1)", [legacy])
+        .expect("insert legacy settings");
+    let loaded = SettingsRepo::new(&db).load().expect("load");
+    assert_eq!(loaded.openai_vision_base_url, "https://api.kimi.com/coding/v1");
+    assert_eq!(loaded.openai_llm_base_url, "https://api.kimi.com/coding/v1");
+    assert_eq!(loaded.openai_vision_api_key, "sk-shared");
+    assert_eq!(loaded.openai_llm_api_key, "sk-shared");
+    // 保存后只写新字段名，旧共用字段名不再出现。
+    SettingsRepo::new(&db).save(&loaded).expect("save");
+    let raw: String = db
+        .conn()
+        .query_row("SELECT value FROM app_settings WHERE key = 'app'", [], |r| r.get(0))
+        .expect("raw");
+    assert!(raw.contains("openai_vision_api_key"), "saved json uses new field names");
+    assert!(!raw.contains("\"openai_api_key\""), "old shared field name must not be written");
 }
 
 #[test]

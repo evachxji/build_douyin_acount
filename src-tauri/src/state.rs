@@ -80,7 +80,7 @@ impl AppState {
     fn build_vision(s: &AppSettings) -> Result<Arc<dyn Vision>, DomainError> {
         if s.vision_provider == "openai" {
             Ok(Arc::new(OpenAiVision {
-                client: OpenAiClient::new(&s.openai_base_url, &s.openai_api_key)?,
+                client: OpenAiClient::new(&s.openai_vision_base_url, &s.openai_vision_api_key)?,
                 model: s.openai_vision_model.clone(),
             }))
         } else {
@@ -95,7 +95,7 @@ impl AppState {
     fn build_llm(s: &AppSettings) -> Result<Arc<dyn Llm>, DomainError> {
         if s.llm_provider == "openai" {
             Ok(Arc::new(OpenAiLlm {
-                client: OpenAiClient::new(&s.openai_base_url, &s.openai_api_key)?,
+                client: OpenAiClient::new(&s.openai_llm_base_url, &s.openai_llm_api_key)?,
                 model: s.openai_llm_model.clone(),
             }))
         } else {
@@ -110,7 +110,7 @@ impl AppState {
     fn build_copy_generator(s: &AppSettings) -> Result<Arc<dyn CopyGenerator>, DomainError> {
         if s.llm_provider == "openai" {
             Ok(Arc::new(OpenAiCopyGenerator {
-                client: OpenAiClient::new(&s.openai_base_url, &s.openai_api_key)?,
+                client: OpenAiClient::new(&s.openai_llm_base_url, &s.openai_llm_api_key)?,
                 model: s.openai_llm_model.clone(),
             }))
         } else {

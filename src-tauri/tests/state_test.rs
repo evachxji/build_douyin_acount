@@ -35,7 +35,7 @@ fn build_pipeline_with_openai_provider_requires_api_key() {
     let dir = tempfile::tempdir().expect("tempdir");
     let settings = AppSettings {
         vision_provider: "openai".to_string(),
-        openai_api_key: String::new(),
+        openai_vision_api_key: String::new(),
         ..AppSettings::default()
     };
     let state = AppState::new(temp_db(), MediaStore::new(dir.path().join("storage")), settings);
@@ -52,7 +52,8 @@ fn build_pipeline_with_openai_providers_builds_when_key_present() {
     let settings = AppSettings {
         vision_provider: "openai".to_string(),
         llm_provider: "openai".to_string(),
-        openai_api_key: "sk-test".to_string(),
+        openai_vision_api_key: "sk-test".to_string(),
+        openai_llm_api_key: "sk-test".to_string(),
         ..AppSettings::default()
     };
     let state = AppState::new(temp_db(), MediaStore::new(dir.path().join("storage")), settings);
@@ -65,7 +66,7 @@ fn build_pipeline_supports_mixed_providers() {
     let settings = AppSettings {
         vision_provider: "ollama".to_string(),
         llm_provider: "openai".to_string(),
-        openai_api_key: "sk-test".to_string(),
+        openai_llm_api_key: "sk-test".to_string(),
         ..AppSettings::default()
     };
     let state = AppState::new(temp_db(), MediaStore::new(dir.path().join("storage")), settings);

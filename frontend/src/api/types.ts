@@ -129,7 +129,6 @@ export interface AppSettings {
   publisher_script: string;
   publisher_browser: string;
   collector_script: string;
-  ytdlp_path: string;
   douyin_sync_script: string;
   account_style: string;
   batch_size: number;
@@ -140,16 +139,77 @@ export interface AppSettings {
   vision_provider: AiProvider;
   /** 文本 LLM 提供方（文案生成跟随此开关）。 */
   llm_provider: AiProvider;
-  /** OpenAI 兼容云端配置（vision 与 llm 共用）。 */
-  openai_base_url: string;
-  openai_api_key: string;
+  /** 视觉模型的 OpenAI 兼容云端配置（与文本模型相互独立）。 */
+  openai_vision_base_url: string;
+  openai_vision_api_key: string;
   openai_vision_model: string;
+  /** 文本模型的 OpenAI 兼容云端配置。 */
+  openai_llm_base_url: string;
+  openai_llm_api_key: string;
   openai_llm_model: string;
   /** 发布时自动设置「自主声明 → 内容为转载信息 → 取材站外」（默认开启）。 */
   publish_declaration: boolean;
 }
 
 export type DraftStatus = "DRAFT" | "FILLED" | "PUBLISHED" | "CANCELLED";
+
+/** 内置 yt-dlp 本地状态（storage/tools/yt-dlp.exe）。 */
+export interface YtDlpStatus {
+  installed: boolean;
+  current_version: string | null;
+  exe_path: string;
+}
+
+/** yt-dlp 更新检查结果（GitHub 最新版本号）。 */
+export interface YtDlpUpdateInfo {
+  latest_version: string;
+  update_available: boolean;
+}
+
+/** yt-dlp 一键更新进度（后端内存态，前端 1s 轮询）。 */
+export interface YtDlpUpdateProgress {
+  stage: "downloading" | "verifying" | "done" | "error";
+  downloaded: number;
+  total: number;
+  speed_bps: number;
+  /** done：新版本号或「已是最新」；error：错误详情。 */
+  message: string;
+}
+
+/** yt-dlp 每日更新检查缓存（每天启动时后台静默检查填充；设置页读它，不联网）。 */
+export interface CachedYtDlpUpdate {
+  state: "checking" | "ok" | "failed";
+  info: YtDlpUpdateInfo | null;
+}
+
+/** 内置 FFmpeg 本地状态（storage/tools/ffmpeg.exe，结构与 yt-dlp 卡片一致）。 */
+export interface FfmpegStatus {
+  installed: boolean;
+  current_version: string | null;
+  exe_path: string;
+}
+
+/** FFmpeg 更新检查结果（gyan.dev release 最新版本号）。 */
+export interface FfmpegUpdateInfo {
+  latest_version: string;
+  update_available: boolean;
+}
+
+/** FFmpeg 一键更新进度（后端内存态，前端 1s 轮询；verifying 含 zip 解压）。 */
+export interface FfmpegUpdateProgress {
+  stage: "downloading" | "verifying" | "done" | "error";
+  downloaded: number;
+  total: number;
+  speed_bps: number;
+  /** done：新版本号或「已是最新」；error：错误详情。 */
+  message: string;
+}
+
+/** FFmpeg 每日更新检查缓存（语义同 CachedYtDlpUpdate）。 */
+export interface CachedFfmpegUpdate {
+  state: "checking" | "ok" | "failed";
+  info: FfmpegUpdateInfo | null;
+}
 
 /** 剪映音乐库本地状态（storage/music）。 */
 export interface MusicStatus {

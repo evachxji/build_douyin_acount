@@ -13,6 +13,14 @@ import type {
   VideoAsset,
   WhisperDownloadRoute,
   WhisperModelInfo,
+  YtDlpStatus,
+  YtDlpUpdateInfo,
+  YtDlpUpdateProgress,
+  CachedYtDlpUpdate,
+  FfmpegStatus,
+  FfmpegUpdateInfo,
+  FfmpegUpdateProgress,
+  CachedFfmpegUpdate,
   MusicStatus,
   MusicSyncResult,
   MusicFile,
@@ -100,6 +108,22 @@ export const api = {
     call<ContentCopy>("update_copy", { assetId, title, body }),
   checkOllama: () => call<boolean>("check_ollama"),
   startOllama: () => call<void>("start_ollama"),
+  getYtdlpStatus: () => call<YtDlpStatus>("get_ytdlp_status"),
+  checkYtdlpUpdate: () => call<YtDlpUpdateInfo>("check_ytdlp_update"),
+  updateYtdlp: () => call<void>("update_ytdlp"),
+  getYtdlpUpdateProgress: () =>
+    call<YtDlpUpdateProgress | null>("get_ytdlp_update_progress"),
+  getCachedYtdlpUpdate: () =>
+    call<CachedYtDlpUpdate>("get_cached_ytdlp_update"),
+
+  // 内置 FFmpeg（storage/tools/ffmpeg.exe；卡片与 yt-dlp 同构）
+  getFfmpegStatus: () => call<FfmpegStatus>("get_ffmpeg_status"),
+  checkFfmpegUpdate: () => call<FfmpegUpdateInfo>("check_ffmpeg_update"),
+  updateFfmpeg: () => call<void>("update_ffmpeg"),
+  getFfmpegUpdateProgress: () =>
+    call<FfmpegUpdateProgress | null>("get_ffmpeg_update_progress"),
+  getCachedFfmpegUpdate: () =>
+    call<CachedFfmpegUpdate>("get_cached_ffmpeg_update"),
 
   // 剪映音乐库（storage/music；同步是一键全量比对，秒级完成，无进度轮询）
   getMusicStatus: () => call<MusicStatus>("get_music_status"),

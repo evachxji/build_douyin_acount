@@ -48,13 +48,20 @@ pub struct AppSettings {
     /// 文本 LLM 提供方：ollama / openai（文案生成跟随此开关）。
     #[serde(default = "default_ai_provider")]
     pub llm_provider: String,
-    /// OpenAI 兼容云端配置（vision 与 llm 共用 base_url 与 key）。
+    /// 视觉模型的 OpenAI 兼容云端配置（base_url/api_key 与文本模型相互独立）。
+    /// 旧版「共用 openai_base_url/openai_api_key」的 JSON 由 SettingsRepo::load 负责迁移
+    /// （serde alias 无法把同一个旧键映射到两个新字段——后者覆盖前者）。
     #[serde(default = "default_openai_base_url")]
-    pub openai_base_url: String,
+    pub openai_vision_base_url: String,
     #[serde(default)]
-    pub openai_api_key: String,
+    pub openai_vision_api_key: String,
     #[serde(default = "default_openai_model")]
     pub openai_vision_model: String,
+    /// 文本模型的 OpenAI 兼容云端配置。
+    #[serde(default = "default_openai_base_url")]
+    pub openai_llm_base_url: String,
+    #[serde(default)]
+    pub openai_llm_api_key: String,
     #[serde(default = "default_openai_model")]
     pub openai_llm_model: String,
     /// 发布时自动设置「自主声明 → 内容为转载信息 → 取材站外」（默认开启；
@@ -88,9 +95,11 @@ impl Default for AppSettings {
             condition_basis: HashMap::new(),
             vision_provider: default_ai_provider(),
             llm_provider: default_ai_provider(),
-            openai_base_url: default_openai_base_url(),
-            openai_api_key: String::new(),
+            openai_vision_base_url: default_openai_base_url(),
+            openai_vision_api_key: String::new(),
             openai_vision_model: default_openai_model(),
+            openai_llm_base_url: default_openai_base_url(),
+            openai_llm_api_key: String::new(),
             openai_llm_model: default_openai_model(),
             publish_declaration: true,
         }
@@ -117,6 +126,33 @@ fn default_openai_model() -> String {
     "k3-256k".to_string()
 }
 
+/// 旧版「vision/llm 共用 openai_base_url/openai_api_key」设置 JSON 的迁移：
+/// 新字段缺失时继承旧共用值（保存时只写新字段名，迁移随下次保存固化）。
+fn migrate_shared_openai_fields(value: &mut serde_json::Value) {
+    if let Some(old) = value
+        .get("openai_base_url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    {
+        for k in ["openai_vision_base_url", "openai_llm_base_url"] {
+            if value.get(k).is_none() {
+                value[k] = serde_json::Value::String(old.clone());
+            }
+        }
+    }
+    if let Some(old) = value
+        .get("openai_api_key")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    {
+        for k in ["openai_vision_api_key", "openai_llm_api_key"] {
+            if value.get(k).is_none() {
+                value[k] = serde_json::Value::String(old.clone());
+            }
+        }
+    }
+}
+
 /// app_settings 表访问层：整个设置序列化为 JSON 存在 `app` 键下。
 pub struct SettingsRepo<'a> {
     db: &'a Database,
@@ -141,7 +177,9 @@ impl<'a> SettingsRepo<'a> {
         let Some(raw) = raw else {
             return Ok(AppSettings::default());
         };
-        Ok(serde_json::from_str(&raw).unwrap_or_default())
+        let mut value: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+        migrate_shared_openai_fields(&mut value);
+        Ok(serde_json::from_value(value).unwrap_or_default())
     }
 
     /// 保存设置（upsert）。
