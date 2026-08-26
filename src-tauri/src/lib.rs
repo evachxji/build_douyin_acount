@@ -5,7 +5,6 @@ pub mod backup;
 pub mod commands;
 pub mod db;
 pub mod domain;
-pub mod export;
 pub mod media;
 pub mod settings;
 pub mod state;
@@ -107,8 +106,6 @@ pub fn run() {
             commands::backup::restart_app,
             commands::collection::start_collection,
             commands::douyin::start_douyin_sync,
-            commands::douyin::start_douyin_export,
-            commands::douyin::save_export_file,
             commands::douyin::list_douyin_posts,
             commands::douyin::get_auto_sync_moderate,
             commands::douyin::set_auto_sync_moderate,
@@ -192,9 +189,6 @@ pub fn run() {
                     }
                     if let Err(e) = runtime.run_once("douyin_moderate") {
                         tracing::warn!("douyin_moderate worker error: {e}");
-                    }
-                    if let Err(e) = runtime.run_once("douyin_export") {
-                        tracing::warn!("douyin_export worker error: {e}");
                     }
                     if let Err(e) = runtime.run_once("content") {
                         tracing::warn!("content worker error: {e}");
