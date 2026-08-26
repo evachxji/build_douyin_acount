@@ -129,6 +129,8 @@ export interface AppSettings {
   openai_api_key: string;
   openai_vision_model: string;
   openai_llm_model: string;
+  /** 发布时自动设置「自主声明 → 内容为转载信息 → 取材站外」（默认开启）。 */
+  publish_declaration: boolean;
 }
 
 export type DraftStatus = "DRAFT" | "FILLED" | "PUBLISHED" | "CANCELLED";

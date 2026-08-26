@@ -18,6 +18,7 @@
 //
 // 用法：node publish.js <job.json>
 // job.json 字段：draftId / videoPath / title / body / hashtags[] /
+//                declaration（自主声明开关，false 时跳过「转载/取材站外」自动设置，缺省开启）/
 //                scheduleTime（"YYYY-MM-DD HH:mm" 本地时间或 null——agent 按发布日历
 //                空档日 + 08:00~19:00 随机分钟算好；null 表示 14 天无空档，提示人工）/
 //                progressFile / cancelFile / confirmFile / coverDir（封面落盘目录）
@@ -744,11 +745,15 @@ async function fillComposer() {
     if (!tag) continue;
     if (!(await applyTopicTag(tag))) tagFailed.push(`#${tag}`);
   }
-  // 自主声明：内容为转载 -> 取材站外 -> 确定（识别不到元素即提示人工，不盲目操作）。
-  const decl = await runOpencli([
-    "browser", session, "eval", buildDeclarationScript(SELECTORS.declaration),
-  ]).catch(() => null);
-  const declState = typeof decl === "string" ? decl : decl?.result ?? decl?.value;
+  // 自主声明：设置为开启时自动执行（内容为转载 -> 取材站外 -> 确定）；
+  // 关闭（job.declaration === false）则整步跳过，由用户自行决定是否人工声明。
+  let declState = "skipped";
+  if (job.declaration !== false) {
+    const decl = await runOpencli([
+      "browser", session, "eval", buildDeclarationScript(SELECTORS.declaration),
+    ]).catch(() => null);
+    declState = typeof decl === "string" ? decl : decl?.result ?? decl?.value;
+  }
   // 定时发布（快步骤先做）：agent 已按日历空档算好时间；null 表示 14 天无空档。
   let schedSet = false;
   if (job.scheduleTime) {
@@ -764,7 +769,7 @@ async function fillComposer() {
   if (tagFailed.length) {
     warns.push(`以下话题未能联想选中，仍是纯文本（不生效），请人工点选：${tagFailed.join("、")}`);
   }
-  if (declState !== "declared") {
+  if (job.declaration !== false && declState !== "declared") {
     warns.push("自主声明未能自动完成，请人工点选：自主声明 → 内容为转载信息 → 取材站外 → 确定");
   }
   if (!coverPicked) {

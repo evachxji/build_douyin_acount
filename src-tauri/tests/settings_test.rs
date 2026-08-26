@@ -68,6 +68,7 @@ fn settings_roundtrip_persists_fields() {
         openai_api_key: "sk-test-key".to_string(),
         openai_vision_model: "kimi-k2.5".to_string(),
         openai_llm_model: "kimi-k2.6".to_string(),
+        publish_declaration: false,
     };
     repo.save(&custom).expect("save");
 
@@ -125,4 +126,5 @@ fn settings_load_legacy_json_without_conditions_keeps_defaults() {
     assert!(loaded.openai_api_key.is_empty(), "missing openai_api_key defaults to empty");
     assert_eq!(loaded.openai_vision_model, "k3-256k");
     assert_eq!(loaded.openai_llm_model, "k3-256k");
+    assert!(loaded.publish_declaration, "missing publish_declaration defaults to true（保持自动声明的历史行为）");
 }

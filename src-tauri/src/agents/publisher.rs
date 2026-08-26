@@ -330,12 +330,18 @@ fn spawn_sidecar(
             "schedule_time": schedule_time.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
         }),
     )?;
+    // 自主声明开关（每次 spawn 现读，设置改动即时生效）；读取失败回退开启（历史行为）。
+    let declaration = crate::settings::SettingsRepo::new(ctx.db)
+        .load()
+        .map(|s| s.publish_declaration)
+        .unwrap_or(true);
     let job = json!({
         "draftId": draft_id,
         "videoPath": asset.file_path,
         "title": draft.title,
         "body": draft.body,
         "hashtags": draft.hashtags,
+        "declaration": declaration,
         "scheduleTime": schedule_time.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
         "progressFile": progress_path(&ctx.store, draft_id),
         "cancelFile": cancel_path(&ctx.store, draft_id),

@@ -33,6 +33,7 @@ const EMPTY: AppSettings = {
   openai_api_key: "",
   openai_vision_model: "k3-256k",
   openai_llm_model: "k3-256k",
+  publish_declaration: true,
 };
 
 const conditionField =
@@ -367,6 +368,17 @@ export function SettingsDrawer({
             items={settings.exclude_conditions}
             onChange={(exclude_conditions) => set({ exclude_conditions })}
           />
+          <label className="col-span-2 flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={settings.publish_declaration}
+              onChange={(e) => set({ publish_declaration: e.target.checked })}
+              className="h-3.5 w-3.5 accent-emerald-500"
+            />
+            <span className="text-xs text-mute">
+              发布时自动设置「自主声明 → 内容为转载信息 → 取材站外」
+            </span>
+          </label>
           <div className="col-span-2 border-t border-line pt-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-mute">
               采集设置

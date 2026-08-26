@@ -16,6 +16,7 @@ use build_douyin_acount_lib::domain::douyin::NewDouyinPost;
 use build_douyin_acount_lib::domain::draft::{DraftStatus, NewDraft};
 use build_douyin_acount_lib::domain::task::TaskStatus;
 use build_douyin_acount_lib::media::MediaStore;
+use build_douyin_acount_lib::settings::{AppSettings, SettingsRepo};
 use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone, Timelike};
 use serde_json::json;
 use std::collections::HashMap;
@@ -126,6 +127,17 @@ fn write_progress(env: &TestEnv, state: &str, message: &str) {
         serde_json::to_string(&json!({ "state": state, "message": message })).unwrap(),
     )
     .expect("write progress");
+}
+
+/// 读取 spawn 时写入的 job.json（sidecar 启动参数）。
+fn read_job(env: &TestEnv) -> serde_json::Value {
+    let path = env
+        .store
+        .root()
+        .join("publish")
+        .join("jobs")
+        .join(format!("{}.json", env.draft_id));
+    serde_json::from_str(&std::fs::read_to_string(path).expect("read job")).expect("parse job")
 }
 
 /// 带发布捕获信息的 published 进度（模拟 sidecar 钩子捕获到页面实际值）。
@@ -540,6 +552,34 @@ fn publisher_schedule_time_skips_slots_taken_by_active_tasks() {
         st.starts_with(&day_after),
         "今天被日历占位、明天被活跃任务占位，应顺延到后天 {day_after}，实际 {st}"
     );
+}
+
+#[test]
+fn publisher_spawn_writes_declaration_flag_in_job() {
+    // 默认（无设置行）：自主声明开启，job.json declaration=true。
+    let env = setup();
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    env.agent.run(&ctx, task).expect("run");
+    assert_eq!(read_job(&env)["declaration"], true, "缺省应开启自主声明");
+
+    // 设置关闭后：spawn 现读设置，job.json declaration=false（sidecar 跳过声明步骤）。
+    let env = setup();
+    let s = AppSettings {
+        publish_declaration: false,
+        ..Default::default()
+    };
+    SettingsRepo::new(&env.db).save(&s).expect("save settings");
+    let ctx = AgentContext {
+        db: &env.db,
+        store: env.store.clone(),
+    };
+    let task = claim(&env);
+    env.agent.run(&ctx, task).expect("run");
+    assert_eq!(read_job(&env)["declaration"], false, "关闭后 job.json 应写 false");
 }
 
 #[test]

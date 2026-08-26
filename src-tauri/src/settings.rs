@@ -58,6 +58,10 @@ pub struct AppSettings {
     pub openai_vision_model: String,
     #[serde(default = "default_openai_model")]
     pub openai_llm_model: String,
+    /// 发布时自动设置「自主声明 → 内容为转载信息 → 取材站外」（默认开启；
+    /// 关闭后发布 sidecar 跳过自主声明步骤）。
+    #[serde(default = "default_true")]
+    pub publish_declaration: bool,
 }
 
 impl Default for AppSettings {
@@ -90,8 +94,13 @@ impl Default for AppSettings {
             openai_api_key: String::new(),
             openai_vision_model: default_openai_model(),
             openai_llm_model: default_openai_model(),
+            publish_declaration: true,
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_douyin_sync_script() -> String {
