@@ -25,7 +25,10 @@ impl Database {
         conn.execute_batch(migrations::MIGRATIONS)?;
         ensure_analysis_conditions_column(&conn)?;
         ensure_eliminate_reason_column(&conn)?;
+        ensure_music_info_column(&conn)?;
         ensure_douyin_posts_violation_columns(&conn)?;
+        ensure_music_covers_url_column(&conn)?;
+        reset_music_covers_not_found_once(&conn)?;
         seed_account_styles(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -64,6 +67,18 @@ fn ensure_eliminate_reason_column(conn: &Connection) -> Result<(), DomainError> 
     Ok(())
 }
 
+/// 旧库升级：video_assets 缺 music_info_json 列时补上（幂等，每次启动安全）。
+fn ensure_music_info_column(conn: &Connection) -> Result<(), DomainError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(video_assets)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    if !cols.iter().any(|c| c == "music_info_json") {
+        conn.execute_batch("ALTER TABLE video_assets ADD COLUMN music_info_json TEXT")?;
+    }
+    Ok(())
+}
+
 /// 旧库升级：douyin_posts 缺违规信息列时补上（幂等，每次启动安全）。
 fn ensure_douyin_posts_violation_columns(conn: &Connection) -> Result<(), DomainError> {
     let mut stmt = conn.prepare("PRAGMA table_info(douyin_posts)")?;
@@ -79,6 +94,39 @@ fn ensure_douyin_posts_violation_columns(conn: &Connection) -> Result<(), Domain
         if !cols.iter().any(|c| c == name) {
             conn.execute_batch(ddl)?;
         }
+    }
+    Ok(())
+}
+
+/// 旧库升级：music_covers 缺 cover_url 列时补上（幂等，每次启动安全）。
+fn ensure_music_covers_url_column(conn: &Connection) -> Result<(), DomainError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(music_covers)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    if !cols.is_empty() && !cols.iter().any(|c| c == "cover_url") {
+        conn.execute_batch("ALTER TABLE music_covers ADD COLUMN cover_url TEXT")?;
+    }
+    Ok(())
+}
+
+/// 一次性升级：封面匹配加了精确源（剪映缓存）与 QQ 音乐回退后，旧的 NOT_FOUND
+/// 记录全部作废重来（用 app_settings 键保证只清一次）。
+fn reset_music_covers_not_found_once(conn: &Connection) -> Result<(), DomainError> {
+    let done: bool = conn
+        .query_row(
+            "SELECT 1 FROM app_settings WHERE key = 'music_covers_reset_v2'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if !done {
+        conn.execute("DELETE FROM music_covers WHERE status = 'NOT_FOUND'", [])?;
+        conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value, updated_at)
+             VALUES ('music_covers_reset_v2', '1', datetime('now'))",
+            [],
+        )?;
     }
     Ok(())
 }

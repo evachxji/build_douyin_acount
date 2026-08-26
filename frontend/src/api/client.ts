@@ -13,6 +13,11 @@ import type {
   VideoAsset,
   WhisperDownloadRoute,
   WhisperModelInfo,
+  MusicStatus,
+  MusicSyncResult,
+  MusicFile,
+  CoverReport,
+  MusicApplyResult,
 } from "./types";
 
 /** 后端 DomainError 统一转成的可读错误。 */
@@ -93,6 +98,28 @@ export const api = {
   getCopy: (assetId: number) => call<ContentCopy | null>("get_copy", { assetId }),
   checkOllama: () => call<boolean>("check_ollama"),
   startOllama: () => call<void>("start_ollama"),
+
+  // 剪映音乐库（storage/music；同步是一键全量比对，秒级完成，无进度轮询）
+  getMusicStatus: () => call<MusicStatus>("get_music_status"),
+  syncMusic: () => call<MusicSyncResult>("sync_music"),
+  openMusicDir: () => call<void>("open_music_dir"),
+  listMusicFiles: () => call<MusicFile[]>("list_music_files"),
+  // 专辑封面增量匹配（只查缺封面的几首；同步后/打开添加音乐弹窗时调用）
+  ensureMusicCovers: () => call<CoverReport>("ensure_music_covers"),
+  addMusicToVideo: (
+    assetId: number,
+    musicPath: string,
+    muteOriginal: boolean,
+    videoVolume: number,
+    musicVolume: number,
+  ) =>
+    call<MusicApplyResult>("add_music_to_video", {
+      assetId,
+      musicPath,
+      muteOriginal,
+      videoVolume,
+      musicVolume,
+    }),
   listWhisperModels: () => call<WhisperModelInfo[]>("list_whisper_models"),
   startWhisperDownload: (model: string, route: WhisperDownloadRoute) =>
     call<void>("start_whisper_download", { model, route }),

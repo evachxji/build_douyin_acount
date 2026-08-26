@@ -25,11 +25,12 @@ const ASSET_COLS: &str = "va.id, va.dedup_key, va.file_path, va.cover_path, va.s
     va.source_url, va.author, va.title, va.description, va.published_at, va.tags_json,
     va.likes, va.comments, va.plays, va.duration_ms, va.status,
     ar.category AS category, ar.quality_score AS quality_score,
-    va.created_at, va.updated_at, va.eliminate_reason";
+    va.created_at, va.updated_at, va.eliminate_reason, va.music_info_json";
 
 fn row_to_asset(row: &Row<'_>) -> rusqlite::Result<VideoAsset> {
     let tags: String = row.get(10)?;
     let status: String = row.get(15)?;
+    let music_info_json: Option<String> = row.get(21)?;
     Ok(VideoAsset {
         id: row.get(0)?,
         dedup_key: row.get(1)?,
@@ -54,6 +55,7 @@ fn row_to_asset(row: &Row<'_>) -> rusqlite::Result<VideoAsset> {
         created_at: row.get(18)?,
         updated_at: row.get(19)?,
         eliminate_reason: row.get(20)?,
+        music_info: music_info_json.and_then(|j| serde_json::from_str(&j).ok()),
     })
 }
 
@@ -200,6 +202,23 @@ impl<'a> AssetsRepo<'a> {
         let n = self.db.conn().execute(
             "UPDATE video_assets SET eliminate_reason = ?1, updated_at = ?2 WHERE id = ?3",
             params![reason, now(), id],
+        )?;
+        if n == 0 {
+            return Err(DomainError::AssetNotFound(id));
+        }
+        Ok(())
+    }
+
+    /// 应用音乐合成结果：file_path 指向合成产物，music_info_json 记录原始路径与选用音乐。
+    pub fn apply_music(
+        &self,
+        id: i64,
+        new_file_path: &str,
+        music_info_json: &str,
+    ) -> Result<(), DomainError> {
+        let n = self.db.conn().execute(
+            "UPDATE video_assets SET file_path = ?1, music_info_json = ?2, updated_at = ?3 WHERE id = ?4",
+            params![new_file_path, music_info_json, now(), id],
         )?;
         if n == 0 {
             return Err(DomainError::AssetNotFound(id));

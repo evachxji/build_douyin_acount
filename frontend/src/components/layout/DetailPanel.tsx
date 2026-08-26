@@ -1,10 +1,11 @@
 import { useAssetsStore } from "../../stores/assetsStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useTaskStore } from "../../stores/taskStore";
-import { videoUrl } from "../../api/urls";
+import { videoUrl, coverUrl } from "../../api/urls";
 import { formatCount, formatDuration, platformLabel } from "../../lib/format";
 import { ScoreBadge } from "../ScoreBadge";
 import { StatusBadge } from "../StatusBadge";
+import { AddMusicDialog } from "./AddMusicDialog";
 import { useEffect, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api/client";
@@ -27,7 +28,15 @@ export function DetailPanel() {
   // （按素材 id 绑定：切换到其他视频时，其按钮保持可点）。
   const [publishingId, setPublishingId] = useState<number | null>(null);
   const [transition, setTransition] = useState<{ action: "approve" | "eliminate" } | null>(null);
+  const [musicOpen, setMusicOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // 视频元素「代次」：添加音乐合成完成后 +1 强制 <video> 重挂载——二次合成时输出文件路径不变
+  // （固定 <uuid>.music.mp4，file_path 不变 key 就不变），旧元素持有已被 ffmpeg 覆盖的文件，
+  // 继续播放会因解码状态损坏卡死页面；重挂载释放旧句柄、从新文件头开始。
+  const [videoEpoch, setVideoEpoch] = useState(0);
+  // 已出帧的视频路径：切换素材后视频首帧加载期间（约几百毫秒）用封面图盖住黑屏加载态，
+  // 本地视频出帧后即刻撤掉封面，切换看起来是瞬时的。
+  const [readyPath, setReadyPath] = useState<string | null>(null);
 
   const asset = assets.find((a) => a.id === focusId) ?? null;
 
@@ -42,6 +51,8 @@ export function DetailPanel() {
       )
     : undefined;
   const publishing = publishingId === asset?.id || activePublishTask != null;
+  // 添加音乐入口（音符图标按钮）仅候选/待发布状态显示，固定在删除按钮左侧。
+  const showMusicBtn = asset != null && ["CANDIDATE", "SELECTED"].includes(asset.status);
 
   useEffect(() => {
     if (!asset) {
@@ -51,6 +62,8 @@ export function DetailPanel() {
     }
     setAnalysis(null);
     setCopy(null);
+    // 切换素材时关掉可能还开着的添加音乐弹窗（弹窗绑定的是旧素材）。
+    setMusicOpen(false);
     void api.getAnalysis(asset.id).then(setAnalysis).catch(() => setAnalysis(null));
     void api.getCopy(asset.id).then(setCopy).catch(() => setCopy(null));
   }, [asset?.id, asset]);
@@ -90,7 +103,7 @@ export function DetailPanel() {
       el.removeEventListener("fullscreenchange", onFsChange);
       window.removeEventListener("keydown", onKey);
     };
-  }, [asset?.file_path]);
+  }, [asset?.file_path, videoEpoch]);
 
   // 任务出现在轮询列表后，本地过渡 loading 交给任务数据驱动（activePublishTask）。
   useEffect(() => {
@@ -265,13 +278,24 @@ export function DetailPanel() {
     <aside className="relative flex min-w-0 flex-1 flex-col bg-panel/60">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="p-4">
-        <video
-          key={asset.file_path}
-          ref={videoRef}
-          src={videoUrl(asset.file_path)}
-          controls
-          className="aspect-video w-full rounded-lg border border-line bg-black"
-        />
+        <div className="relative">
+          <video
+            key={`${asset.file_path}:${videoEpoch}`}
+            ref={videoRef}
+            // ?v= 破坏浏览器对同路径旧内容的启发式缓存（二次合成同路径覆盖后必须读到新文件）
+            src={`${videoUrl(asset.file_path)}?v=${videoEpoch}`}
+            controls
+            onLoadedData={() => setReadyPath(asset.file_path)}
+            className="aspect-video w-full rounded-lg border border-line bg-black"
+          />
+          {readyPath !== asset.file_path && asset.cover_path && (
+            <img
+              src={coverUrl(asset.cover_path)}
+              alt=""
+              className="pointer-events-none absolute inset-0 h-full w-full rounded-lg border border-line bg-black object-contain"
+            />
+          )}
+        </div>
       </div>
 
       <div className="px-4">
@@ -450,14 +474,51 @@ export function DetailPanel() {
           )}
         </button>
         )}
+        {showMusicBtn && (
+          <button
+            onClick={() => {
+              // 先暂停正在播放的视频，避免试听/合成时与视频声音叠在一起。
+              videoRef.current?.pause();
+              setMusicOpen(true);
+            }}
+            disabled={publishing}
+            className={`ml-auto flex h-9 w-9 items-center justify-center rounded border text-sm disabled:opacity-40 ${
+              asset.music_info
+                ? "border-accent bg-accent/15 text-accent"
+                : "border-line text-mute hover:border-accent/50 hover:text-paper"
+            }`}
+            title={
+              publishing
+                ? "发布任务进行中，暂不能替换视频文件"
+                : asset.music_info
+                  ? `已添加：${asset.music_info.music_name}，再次合成将从原始视频重来`
+                  : "添加音乐：从音乐库选一首合成进视频（可试听、可关闭原声）"
+            }
+          >
+            ♪
+          </button>
+        )}
         <button
           onClick={() => void handleDelete()}
-          className="ml-auto h-9 rounded border border-bad/40 px-3 text-sm text-bad hover:bg-bad/10"
+          className={`${showMusicBtn ? "" : "ml-auto "}h-9 rounded border border-bad/40 px-3 text-sm text-bad hover:bg-bad/10`}
         >
           删除
         </button>
       </div>
       {transitionOverlay}
+      {musicOpen && (
+        <AddMusicDialog
+          asset={asset}
+          onClose={() => setMusicOpen(false)}
+          onApplied={() => {
+            setMusicOpen(false);
+            // 强制 <video> 重挂载：二次合成是同路径覆盖，旧元素持有的文件已失效；
+            // 随后刷新列表让 file_path/music_info 进组件（首次合成时 file_path 本身也会变）。
+            setVideoEpoch((e) => e + 1);
+            void useAssetsStore.getState().load();
+          }}
+        />
+      )}
     </aside>
   );
 }

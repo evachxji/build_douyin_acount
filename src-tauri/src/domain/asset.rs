@@ -84,6 +84,31 @@ impl std::str::FromStr for AssetStatus {
     }
 }
 
+/// 素材已合成音乐的信息（video_assets.music_info_json 反序列化；NULL = 未合成过）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MusicInfo {
+    /// 首次合成前的原始视频路径（再次合成从它重来，不叠音；删除素材时一并清理）。
+    pub origin_file_path: String,
+    /// 选用的音乐文件名（展示用，如 `Lemon - Kenshi Yonezu.m4a`）。
+    pub music_name: String,
+    /// 是否关闭原声。
+    pub mute_original: bool,
+    /// 原声音量百分比 0-100（保留原声混音时生效；旧记录缺省 30）。
+    #[serde(default = "default_full_volume")]
+    pub video_volume: i64,
+    /// 音乐音量百分比 0-100（保留原声混音时生效；旧记录缺省 70）。
+    #[serde(default = "default_bgm_volume")]
+    pub music_volume: i64,
+}
+
+fn default_full_volume() -> i64 {
+    30
+}
+
+fn default_bgm_volume() -> i64 {
+    70
+}
+
 /// 完整的视频资产记录（含来自分析结果的分组/评分字段）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VideoAsset {
@@ -105,6 +130,8 @@ pub struct VideoAsset {
     pub status: AssetStatus,
     /// 淘汰原因（AI 淘汰为具体原因，手工淘汰为「手工淘汰」，非淘汰态为 None）。
     pub eliminate_reason: Option<String>,
+    /// 已合成音乐的信息（未合成为 None）。
+    pub music_info: Option<MusicInfo>,
     /// 来自 analysis_results 的联表字段，未分析时为 None。
     pub category: Option<String>,
     pub quality_score: Option<i64>,

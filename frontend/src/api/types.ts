@@ -33,10 +33,26 @@ export interface VideoAsset {
   duration_ms: number;
   status: AssetStatus;
   eliminate_reason: string | null;
+  /** 已合成音乐的信息（未合成为 null）。 */
+  music_info: MusicInfo | null;
   category: string | null;
   quality_score: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/** 素材已合成音乐的信息（再次合成从 origin_file_path 重来，不叠音）。 */
+export interface MusicInfo {
+  /** 首次合成前的原始视频路径。 */
+  origin_file_path: string;
+  /** 选用的音乐文件名。 */
+  music_name: string;
+  /** 是否关闭原声。 */
+  mute_original: boolean;
+  /** 原声音量百分比 0-100（保留原声混音时生效；旧记录缺省 30）。 */
+  video_volume: number;
+  /** 音乐音量百分比 0-100（保留原声混音时生效；旧记录缺省 70）。 */
+  music_volume: number;
 }
 
 export interface AnalysisResult {
@@ -135,6 +151,52 @@ export interface AppSettings {
 
 export type DraftStatus = "DRAFT" | "FILLED" | "PUBLISHED" | "CANCELLED";
 
+/** 剪映音乐库本地状态（storage/music）。 */
+export interface MusicStatus {
+  /** 已同步到本地音乐目录的音频文件数。 */
+  count: number;
+  /** 本地音乐目录绝对路径。 */
+  dir: string;
+  /** 本机是否存在剪映音乐缓存。 */
+  cache_found: boolean;
+}
+
+/** 剪映音乐一键同步结果。 */
+export interface MusicSyncResult {
+  copied: number;
+  skipped: number;
+  /** 未匹配歌名而跳过（未复制）的文件数。 */
+  unmatched: number;
+}
+
+/** 音乐库文件（添加音乐弹窗列表项）。 */
+export interface MusicFile {
+  /** 文件名去扩展名（展示用）。 */
+  name: string;
+  /** 完整文件名。 */
+  file_name: string;
+  /** 绝对路径。 */
+  path: string;
+  size_bytes: number;
+  /** 专辑封面绝对路径（未匹配到为 null）。 */
+  cover_path: string | null;
+}
+
+/** 专辑封面增量匹配结果（iTunes Search API）。 */
+export interface CoverReport {
+  /** 本次新下载到封面的数量。 */
+  downloaded: number;
+  /** 本次查询后仍未找到/下载失败的数量。 */
+  not_found: number;
+  /** 已有封面（或近期已查过未找到）而跳过的数量。 */
+  skipped: number;
+}
+
+/** 添加音乐合成结果（素材 file_path 已指向合成产物）。 */
+export interface MusicApplyResult {
+  file_path: string;
+  music_info: MusicInfo;
+}
 
 /** Whisper 模型下载进度（后端 progress 文件原样透传；interrupted 由后端按心跳判定后标注）。 */
 export interface WhisperDownloadProgress {

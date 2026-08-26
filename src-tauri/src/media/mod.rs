@@ -51,6 +51,16 @@ impl MediaStore {
         self.root.join("tools")
     }
 
+    /// 剪映缓存音乐同步落点（`music/`，备份 zip 自动包含——用户内容资产）。
+    pub fn music_dir(&self) -> PathBuf {
+        self.root.join("music")
+    }
+
+    /// 音乐专辑封面落点（`music/covers/`，与音乐的映射见 music_covers 表）。
+    pub fn music_covers_dir(&self) -> PathBuf {
+        self.root.join("music").join("covers")
+    }
+
     /// Whisper 内置模型根目录（`models/whisper/<模型名>/`，由应用自行下载管理）。
     pub fn models_dir(&self) -> PathBuf {
         self.root.join("models").join("whisper")
@@ -68,6 +78,8 @@ impl MediaStore {
             self.db_dir().as_path(),
             self.tools_dir().as_path(),
             self.models_dir().as_path(),
+            self.music_dir().as_path(),
+            self.music_covers_dir().as_path(),
         ] {
             std::fs::create_dir_all(dir)?;
         }
@@ -149,7 +161,7 @@ impl<'a> VideoManager<'a> {
             .expect("just inserted asset must exist"))
     }
 
-    /// 删除资产：先清理磁盘文件（视频/封面/抽帧/音频），再删除数据库记录。
+    /// 删除资产：先清理磁盘文件（视频/封面/抽帧/音频/音乐合成原件），再删除数据库记录。
     pub fn delete_asset(&self, id: i64) -> Result<(), DomainError> {
         let asset = self
             .get_asset(id)?
@@ -159,6 +171,10 @@ impl<'a> VideoManager<'a> {
             if !p.is_empty() {
                 remove_if_in_store(&self.store, Path::new(p));
             }
+        }
+        // 音乐合成前的原始视频（file_path 已指向合成产物，原件靠 music_info 追踪）。
+        if let Some(info) = &asset.music_info {
+            remove_if_in_store(&self.store, Path::new(&info.origin_file_path));
         }
         let frames = self.store.frames_dir().join(id.to_string());
         let _ = std::fs::remove_dir_all(&frames);

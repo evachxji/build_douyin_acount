@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS video_assets (
   duration_ms INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'NEW',
   eliminate_reason TEXT,
+  music_info_json TEXT,
   is_favorite INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -141,6 +142,17 @@ CREATE TABLE IF NOT EXISTS douyin_posts (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_douyin_posts_public_time ON douyin_posts(public_time);
+
+-- 音乐文件 ↔ 专辑封面映射（封面落盘 storage/music/covers/，此处记映射与查询状态）。
+-- status: URL_READY（同步时从剪映缓存拿到精确封面URL，待下载）/ FOUND（cover_path 有效）
+-- / NOT_FOUND（网上未找到，queried_at 起 7 天后才重试，避免每次同步重复打外网）。
+CREATE TABLE IF NOT EXISTS music_covers (
+  file_name TEXT PRIMARY KEY,
+  cover_path TEXT,
+  cover_url TEXT,
+  status TEXT NOT NULL,
+  queried_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- 状态模型重构（第五阶段）：READY -> CANDIDATE；SKIPPED/LOW_PRIORITY -> ELIMINATED
 UPDATE video_assets SET status = 'CANDIDATE' WHERE status = 'READY';

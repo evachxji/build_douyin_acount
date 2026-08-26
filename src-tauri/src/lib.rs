@@ -6,6 +6,9 @@ pub mod commands;
 pub mod db;
 pub mod domain;
 pub mod media;
+pub mod music_mix;
+pub mod music_sync;
+pub mod music_covers;
 pub mod settings;
 pub mod state;
 pub mod tools;
@@ -113,6 +116,12 @@ pub fn run() {
             commands::douyin::moderate_douyin_violation,
             commands::douyin::moderate_all_violations,
             commands::douyin::open_url,
+            commands::music::get_music_status,
+            commands::music::sync_music,
+            commands::music::open_music_dir,
+            commands::music::list_music_files,
+            commands::music::add_music_to_video,
+            commands::music::ensure_music_covers,
             commands::content::generate_copy,
             commands::content::get_copy,
             commands::content::get_recommendations,

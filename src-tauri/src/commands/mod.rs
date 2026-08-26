@@ -5,6 +5,7 @@ pub mod collection;
 pub mod content;
 pub mod douyin;
 pub mod ffmpeg;
+pub mod music;
 pub mod ollama;
 pub mod publish;
 pub mod settings;
