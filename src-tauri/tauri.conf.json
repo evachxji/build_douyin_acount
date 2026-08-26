@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.builddouyinacount.app",
   "build": {
-    "beforeDevCommand": "pnpm --dir frontend dev",
+    "beforeDevCommand": "node scripts/ensure-ytdlp.mjs && node scripts/ensure-ffmpeg.mjs && pnpm --dir frontend dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm --dir frontend build",
+    "beforeBuildCommand": "node scripts/ensure-ytdlp.mjs && node scripts/ensure-ffmpeg.mjs && pnpm --dir frontend build",
     "frontendDist": "../frontend/dist"
   },
   "app": {
@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": ["resources/yt-dlp.exe", "resources/ffmpeg.exe", "resources/ffprobe.exe"],
     "windows": {
       "nsis": {
         "installMode": "perMachine"

@@ -21,9 +21,8 @@ pub struct AppSettings {
     pub node_bin: String,
     pub publisher_script: String,
     pub publisher_browser: String,
-    /// 采集 sidecar 与 yt-dlp 路径。
+    /// 采集 sidecar。
     pub collector_script: String,
-    pub ytdlp_path: String,
     /// 抖音作品数据同步 sidecar（Node 脚本路径）。
     #[serde(default = "default_douyin_sync_script")]
     pub douyin_sync_script: String,
@@ -78,7 +77,6 @@ impl Default for AppSettings {
             publisher_script: "scripts/douyin-publisher/publish.js".to_string(),
             publisher_browser: "chrome".to_string(),
             collector_script: "scripts/collector/collect.js".to_string(),
-            ytdlp_path: "yt-dlp".to_string(),
             douyin_sync_script: default_douyin_sync_script(),
             account_style: "治愈".to_string(),
             batch_size: 20,
@@ -179,6 +177,73 @@ impl<'a> SettingsRepo<'a> {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value,
                 updated_at = datetime('now')",
             [if enabled { "1" } else { "0" }],
+        )?;
+        Ok(())
+    }
+
+    /// yt-dlp 每日更新检查（独立 key `ytdlp_update_check`，JSON {"date","latest"}；
+    /// latest=null 表示当天检查失败——一天只联网一次，失败当天不再自动重试）。
+    /// 返回 (date, latest)。
+    pub fn get_ytdlp_update_check(&self) -> Result<Option<(String, Option<String>)>, DomainError> {
+        let raw: Option<String> = self
+            .db
+            .conn()
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'ytdlp_update_check'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let v: serde_json::Value = serde_json::from_str(&raw)?;
+        Ok(Some((
+            v["date"].as_str().unwrap_or_default().to_string(),
+            v["latest"].as_str().map(str::to_string),
+        )))
+    }
+
+    pub fn set_ytdlp_update_check(&self, date: &str, latest: Option<&str>) -> Result<(), DomainError> {
+        let raw = serde_json::json!({ "date": date, "latest": latest }).to_string();
+        self.db.conn().execute(
+            "INSERT INTO app_settings (key, value) VALUES ('ytdlp_update_check', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                updated_at = datetime('now')",
+            [&raw],
+        )?;
+        Ok(())
+    }
+
+    /// FFmpeg 每日更新检查（独立 key `ffmpeg_update_check`，结构与 ytdlp_update_check 相同）。
+    /// 返回 (date, latest)。
+    pub fn get_ffmpeg_update_check(&self) -> Result<Option<(String, Option<String>)>, DomainError> {
+        let raw: Option<String> = self
+            .db
+            .conn()
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'ffmpeg_update_check'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let v: serde_json::Value = serde_json::from_str(&raw)?;
+        Ok(Some((
+            v["date"].as_str().unwrap_or_default().to_string(),
+            v["latest"].as_str().map(str::to_string),
+        )))
+    }
+
+    pub fn set_ffmpeg_update_check(&self, date: &str, latest: Option<&str>) -> Result<(), DomainError> {
+        let raw = serde_json::json!({ "date": date, "latest": latest }).to_string();
+        self.db.conn().execute(
+            "INSERT INTO app_settings (key, value) VALUES ('ffmpeg_update_check', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                updated_at = datetime('now')",
+            [&raw],
         )?;
         Ok(())
     }

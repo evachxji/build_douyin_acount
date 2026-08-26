@@ -22,7 +22,6 @@ fn settings_defaults_when_nothing_stored() {
     assert_eq!(settings.node_bin, "node");
     assert_eq!(settings.publisher_browser, "chrome");
     assert_eq!(settings.collector_script, "scripts/collector/collect.js");
-    assert_eq!(settings.ytdlp_path, "yt-dlp");
     assert_eq!(settings.account_style, "治愈");
     assert_eq!(settings.batch_size, 20);
     assert_eq!(settings.tiktok_ratio, 0.3);
@@ -52,7 +51,6 @@ fn settings_roundtrip_persists_fields() {
         publisher_script: "scripts/dev-publish.js".to_string(),
         publisher_browser: "chromium".to_string(),
         collector_script: "scripts/dev-collect.js".to_string(),
-        ytdlp_path: "yt-dlp-dev".to_string(),
         douyin_sync_script: "scripts/dev-sync.js".to_string(),
         account_style: "搞笑".to_string(),
         batch_size: 30,
@@ -127,4 +125,19 @@ fn settings_load_legacy_json_without_conditions_keeps_defaults() {
     assert_eq!(loaded.openai_vision_model, "k3-256k");
     assert_eq!(loaded.openai_llm_model, "k3-256k");
     assert!(loaded.publish_declaration, "missing publish_declaration defaults to true（保持自动声明的历史行为）");
+}
+
+#[test]
+fn ytdlp_update_check_roundtrip() {
+    let db = test_db();
+    let repo = SettingsRepo::new(&db);
+    assert!(repo.get_ytdlp_update_check().expect("get empty").is_none(), "未检查时为空");
+    repo.set_ytdlp_update_check("2026-08-25", Some("2026.08.19")).expect("set ok");
+    let (date, latest) = repo.get_ytdlp_update_check().expect("get").expect("some");
+    assert_eq!(date, "2026-08-25");
+    assert_eq!(latest.as_deref(), Some("2026.08.19"));
+    // 失败标记：latest=None（当天不再自动重试，等第二天或手动「检查更新」）。
+    repo.set_ytdlp_update_check("2026-08-25", None).expect("set failed");
+    let (_, latest) = repo.get_ytdlp_update_check().expect("get").expect("some");
+    assert!(latest.is_none());
 }

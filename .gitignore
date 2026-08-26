@@ -51,3 +51,10 @@ logs/
 /scripts/whisper-server/.venv/
 __pycache__/
 *.pyc
+
+# ---- 内置 yt-dlp 打包资源（scripts/ensure-ytdlp.mjs 构建期自动下载）----
+/src-tauri/resources/yt-dlp.exe
+
+# ---- 内置 FFmpeg 打包资源（scripts/ensure-ffmpeg.mjs 构建期自动下载）----
+/src-tauri/resources/ffmpeg.exe
+/src-tauri/resources/ffprobe.exe

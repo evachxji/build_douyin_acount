@@ -1,11 +1,37 @@
 use std::process::Command;
+use std::sync::RwLock;
 
 use crate::domain::error::DomainError;
 
-/// 执行外部工具；支持通过环境变量覆盖路径（如 FFMPEG_PATH / FFPROBE_PATH）。
-pub fn run_tool(name: &str, args: &[&str]) -> Result<Vec<u8>, DomainError> {
+/// 内置工具目录（storage/tools，lib.rs setup 与 AppState 构造时登记）。
+static TOOLS_DIR: RwLock<Option<std::path::PathBuf>> = RwLock::new(None);
+
+/// 登记内置工具目录；可重复调用（测试用 tempdir 各自覆盖，无 exe 时自然落回 PATH）。
+pub fn set_tools_dir(dir: std::path::PathBuf) {
+    *TOOLS_DIR.write().expect("tools dir lock poisoned") = Some(dir);
+}
+
+/// 工具路径解析：环境变量覆盖（FFMPEG_PATH / FFPROBE_PATH，e2e/开发逃生口）
+/// → 内置 exe（storage/tools/<name>.exe，存在才用）→ PATH 裸命令。
+fn resolve_tool(name: &str) -> String {
     let env_name = format!("{name}_PATH").to_uppercase();
-    let tool = std::env::var(&env_name).unwrap_or_else(|_| name.to_string());
+    if let Ok(p) = std::env::var(&env_name) {
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    if let Some(dir) = TOOLS_DIR.read().expect("tools dir lock poisoned").as_ref() {
+        let exe = dir.join(format!("{name}.exe"));
+        if exe.is_file() {
+            return exe.to_string_lossy().into_owned();
+        }
+    }
+    name.to_string()
+}
+
+/// 执行外部工具；路径解析见 `resolve_tool`。
+pub fn run_tool(name: &str, args: &[&str]) -> Result<Vec<u8>, DomainError> {
+    let tool = resolve_tool(name);
     let output = Command::new(&tool).args(args).output().map_err(|e| DomainError::Process {
         cmd: tool.clone(),
         detail: format!("spawn failed: {e}"),

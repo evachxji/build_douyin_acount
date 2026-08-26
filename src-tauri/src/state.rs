@@ -28,6 +28,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(db: Database, store: MediaStore, settings: AppSettings) -> Self {
+        // 登记内置工具目录：run_tool（抽帧/封面/时长探测/音乐合成）优先用内置 ffmpeg/ffprobe。
+        crate::util::set_tools_dir(store.tools_dir());
         Self {
             db: Arc::new(db),
             store,
@@ -130,16 +132,19 @@ impl AppState {
                 condition_basis: s.condition_basis.clone(),
             }
         };
-        let (node_bin, script, collector_script, ytdlp, douyin_sync_script) = {
+        let (node_bin, script, collector_script, douyin_sync_script) = {
             let s = self.settings.read().expect("settings lock poisoned");
             (
                 s.node_bin.clone(),
                 self.resolve_path(&s.publisher_script),
                 self.resolve_path(&s.collector_script),
-                s.ytdlp_path.clone(),
                 self.resolve_path(&s.douyin_sync_script),
             )
         };
+        // yt-dlp 已内置（storage/tools/yt-dlp.exe），不再读设置里的外部路径。
+        let ytdlp = crate::tools::ytdlp::exe_path(&self.store)
+            .to_string_lossy()
+            .into_owned();
         let mut runtime = AgentRuntime::new(&self.db, self.store.clone());
         runtime.register(Box::new(VisionAgent::new(self.build_pipeline()?, rules)));
         runtime.register(Box::new(crate::agents::publisher::PublisherAgent::new(

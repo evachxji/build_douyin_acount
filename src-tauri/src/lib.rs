@@ -8,6 +8,7 @@ pub mod domain;
 pub mod media;
 pub mod settings;
 pub mod state;
+pub mod tools;
 pub mod util;
 pub mod whisper_models;
 
@@ -131,8 +132,59 @@ pub fn run() {
             commands::whisper_models::start_whisper_download,
             commands::whisper_models::cancel_whisper_download,
             commands::whisper_models::delete_whisper_model,
+            commands::ytdlp::get_ytdlp_status,
+            commands::ytdlp::check_ytdlp_update,
+            commands::ytdlp::update_ytdlp,
+            commands::ytdlp::get_ytdlp_update_progress,
+            commands::ytdlp::get_cached_ytdlp_update,
+            commands::ffmpeg::get_ffmpeg_status,
+            commands::ffmpeg::check_ffmpeg_update,
+            commands::ffmpeg::update_ffmpeg,
+            commands::ffmpeg::get_ffmpeg_update_progress,
+            commands::ffmpeg::get_cached_ffmpeg_update,
         ])
         .setup(|app| {
+            // 内置 yt-dlp：安装版首启从打包资源释放到数据目录（仅缺失时释放，
+            // 绝不覆盖——用户一键更新过的新版不能被内置旧版顶掉）。
+            {
+                let mut candidates: Vec<PathBuf> = app
+                    .path()
+                    .resource_dir()
+                    .map(|d| vec![d.join("yt-dlp.exe")])
+                    .unwrap_or_default();
+                candidates.push(
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/yt-dlp.exe"),
+                );
+                let state = app.handle().state::<AppState>();
+                tools::ytdlp::ensure_from_bundle(&state.store, &candidates);
+            }
+            // 内置 FFmpeg：安装版首启从打包资源释放 ffmpeg/ffprobe 到数据目录
+            //（仅缺失时释放，绝不覆盖）。随后把 tools 目录登记给 run_tool——
+            // 抽帧/封面/时长探测/音乐合成全部优先用内置 exe，FFMPEG_PATH 环境变量仍可覆盖。
+            {
+                let mut candidates: Vec<PathBuf> = app
+                    .path()
+                    .resource_dir()
+                    .map(|d| vec![d])
+                    .unwrap_or_default();
+                candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources"));
+                let state = app.handle().state::<AppState>();
+                tools::ffmpeg::ensure_from_bundle(&state.store, &candidates);
+                crate::util::set_tools_dir(state.store.tools_dir());
+            }
+            // 每天首次启动后台静默检查一次 FFmpeg 更新（同 yt-dlp 契约）。
+            let handle_ff = app.handle().clone();
+            std::thread::spawn(move || {
+                let state = handle_ff.state::<AppState>();
+                commands::ffmpeg::maybe_auto_check(&state.db);
+            });
+            // 每天首次启动后台静默检查一次 yt-dlp 更新（结果缓存内存+落 db；
+            // 设置页只读缓存不联网，「检查更新」按钮是手动强制刷新）。
+            let handle_yd = app.handle().clone();
+            std::thread::spawn(move || {
+                let state = handle_yd.state::<AppState>();
+                commands::ytdlp::maybe_auto_check(&state.db);
+            });
             // 系统托盘：关窗仅隐藏到托盘，后台任务（分析/发布/巡检）继续运行；
             // 仅托盘菜单【退出】真正结束进程。左键单击托盘图标恢复窗口。
             let show = tauri::menu::MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
