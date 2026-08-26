@@ -23,17 +23,25 @@ export function DetailPanel() {
   const [copy, setCopy] = useState<ContentCopy | null>(null);
   const [busy, setBusy] = useState(false);
   const [copying, setCopying] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  // 「准备中」兜底的固定 deadline：useEffect 会随 2.5s 轮询重跑，用 setTimeout(60s)
-  // 计时会被不断重置永不触发（曾导致取消后按钮永远卡在「准备中」）。
-  const publishDeadlineRef = useRef(0);
-  // 本次点击创建的任务 id：复位只认它，否则列表里上一次运行的终态任务会让
-  // loading 在点击后立刻被复位（表现为按钮毫无变化）。
-  const publishTaskIdRef = useRef<number | null>(null);
+  // 刚点击【准备发布】、任务尚未出现在 2.5s 轮询列表时的本地过渡 loading
+  // （按素材 id 绑定：切换到其他视频时，其按钮保持可点）。
+  const [publishingId, setPublishingId] = useState<number | null>(null);
   const [transition, setTransition] = useState<{ action: "approve" | "eliminate" } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const asset = assets.find((a) => a.id === focusId) ?? null;
+
+  // 该素材的活跃发布任务：按钮状态由任务数据驱动——切换视频时各自绑定，
+  // 任务终态（发布/取消/失败）后自动恢复可点；活跃期禁止重复入队。
+  const activePublishTask = asset
+    ? tasks.find(
+        (t) =>
+          t.agent_name === "publisher" &&
+          Number(t.payload.asset_id) === asset.id &&
+          (t.status === "PENDING" || t.status === "RUNNING"),
+      )
+    : undefined;
+  const publishing = publishingId === asset?.id || activePublishTask != null;
 
   useEffect(() => {
     if (!asset) {
@@ -84,29 +92,17 @@ export function DetailPanel() {
     };
   }, [asset?.file_path]);
 
-  // 准备发布后保持 loading，直到本次点击创建的任务进入可交互阶段
-  // （stage=file 兜底弹窗 / WAITING_FOR_HUMAN 待确认）或终态（含取消）；60s 固定 deadline 兜底。
+  // 任务出现在轮询列表后，本地过渡 loading 交给任务数据驱动（activePublishTask）。
   useEffect(() => {
-    if (!publishing || !asset) return;
-    const taskId = publishTaskIdRef.current;
-    const t = taskId == null ? undefined : tasks.find((t) => t.id === taskId);
-    if (
-      t &&
-      (t.payload.stage === "file" ||
-        t.status === "WAITING_FOR_HUMAN" ||
-        ["SUCCEEDED", "FAILED", "CANCELLED"].includes(t.status))
-    ) {
-      setPublishing(false);
-      return;
-    }
-    const remain = publishDeadlineRef.current - Date.now();
-    if (remain <= 0) {
-      setPublishing(false);
-      return;
-    }
-    const timer = setTimeout(() => setPublishing(false), remain);
-    return () => clearTimeout(timer);
-  }, [publishing, tasks, asset]);
+    if (publishingId == null) return;
+    const appeared = tasks.some(
+      (t) =>
+        t.agent_name === "publisher" &&
+        Number(t.payload.asset_id) === publishingId &&
+        (t.status === "PENDING" || t.status === "RUNNING"),
+    );
+    if (appeared) setPublishingId(null);
+  }, [publishingId, tasks]);
 
   const handleGenerateCopy = async () => {
     if (!asset) return;
@@ -253,17 +249,15 @@ export function DetailPanel() {
   };
 
   const handlePreparePublish = async () => {
-    setPublishing(true);
-    publishDeadlineRef.current = Date.now() + 60_000;
-    publishTaskIdRef.current = null;
+    if (!asset) return;
+    setPublishingId(asset.id);
     try {
-      const res = await api.preparePublish(asset.id);
-      publishTaskIdRef.current = res.task_id;
+      await api.preparePublish(asset.id);
       // 任务入队后稍等后台 worker 拉起 sidecar，再刷新任务数据（不打开底部任务面板）。
       setTimeout(() => void useTaskStore.getState().refresh(), 1200);
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
-      setPublishing(false);
+      setPublishingId(null);
     }
   };
 
@@ -436,13 +430,21 @@ export function DetailPanel() {
           onClick={() => void handlePreparePublish()}
           disabled={publishing}
           className="inline-flex h-9 items-center justify-center gap-1.5 rounded border border-accent bg-accent px-3 text-sm font-medium text-ink hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          title="打开独立浏览器窗口，自动上传视频并填写标题/文案/话题（最终发布由你本人点击）"
+          title={
+            activePublishTask?.payload.stage === "form_ready"
+              ? "表单已填好，请到左侧栏「发布中」列表点 ✓ 确认发布"
+              : "打开独立浏览器窗口，自动上传视频并填写标题/文案/话题；表单就绪后在左侧栏点 ✓ 确认发布"
+          }
         >
           {publishing ? (
-            <>
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink/40 border-t-ink" />
-              准备中…
-            </>
+            activePublishTask?.payload.stage === "form_ready" ? (
+              "待确认发布"
+            ) : (
+              <>
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink/40 border-t-ink" />
+                准备中…
+              </>
+            )
           ) : (
             "准备发布"
           )}
