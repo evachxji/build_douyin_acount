@@ -169,7 +169,7 @@ export function AddMusicDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="w-[min(1060px,94vw)] rounded-xl border border-accent/40 bg-panel p-6 shadow-2xl">
+      <div className="w-[min(1280px,96vw)] rounded-xl border border-accent/40 bg-panel p-6 shadow-2xl">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-paper">添加音乐</h3>
           <button onClick={onClose} className="text-sm text-mute hover:text-paper">
@@ -297,11 +297,11 @@ export function AddMusicDialog({
           </div>
 
           {/* 右栏：音乐选择（点击歌名即与视频同步试听） */}
-          <div className="flex w-[460px] shrink-0 flex-col">
+          <div className="flex w-[620px] shrink-0 flex-col">
             <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-mute">
               选择音乐（点击即试听）
             </p>
-            <div className="max-h-[360px] overflow-y-auto pr-0.5">
+            <div className="max-h-[480px] overflow-y-auto pr-0.5">
               {files === null ? (
                 <p className="rounded border border-line p-4 text-xs text-mute">读取音乐库…</p>
               ) : files.length === 0 ? (
@@ -310,7 +310,7 @@ export function AddMusicDialog({
                   storage/music 目录。
                 </p>
               ) : (
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-2 gap-3">
                   {files.map((f) => {
                     const active = selected === f.path;
                     return (
@@ -322,7 +322,7 @@ export function AddMusicDialog({
                           togglePlay(f.path);
                         }}
                         title={f.file_name}
-                        className={`flex h-[60px] cursor-pointer items-center gap-2.5 rounded border p-2 text-sm ${
+                        className={`flex h-[84px] cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${
                           active
                             ? "border-accent bg-accent/15 text-accent"
                             : "border-line text-paper/85 hover:border-accent/50 hover:bg-white/5"
@@ -332,20 +332,21 @@ export function AddMusicDialog({
                           <img
                             src={coverUrl(f.cover_path)}
                             alt=""
-                            className="h-11 w-11 shrink-0 rounded object-cover"
+                            className="h-14 w-14 shrink-0 rounded-md object-cover"
                           />
                         ) : (
                           <span
-                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded border border-line/60 text-base ${
+                            className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-line/60 text-xl ${
                               active ? "text-accent" : "text-mute"
                             }`}
                           >
                             ♪
                           </span>
                         )}
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{f.name}</span>
-                          <span className="block text-[11px] text-mute">
+                        <span className="min-w-0 flex-1 self-stretch py-0.5">
+                          {/* 歌名最多两行完整展示，超出才省略 */}
+                          <span className="line-clamp-2 leading-snug break-all">{f.name}</span>
+                          <span className="mt-1 block text-[11px] text-mute">
                             {durations[f.path] ? fmtDur(durations[f.path]) : "--:--"} ·{" "}
                             {formatBytes(f.size_bytes)}
                           </span>
@@ -358,7 +359,7 @@ export function AddMusicDialog({
                             togglePlay(f.path);
                           }}
                           title={playing === f.path ? "暂停" : "试听"}
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] ${
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs ${
                             playing === f.path
                               ? "border-accent bg-accent text-ink"
                               : "border-line text-mute hover:border-accent/60 hover:text-paper"
