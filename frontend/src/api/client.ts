@@ -81,9 +81,6 @@ export const api = {
   startCollection: () =>
     call<{ platform: string; count: number; task_id: number }[]>("start_collection"),
   startDouyinSync: () => call<number>("start_douyin_sync"),
-  startDouyinExport: () => call<number>("start_douyin_export"),
-  saveExportFile: (src: string, dest: string) =>
-    call<void>("save_export_file", { src, dest }),
   listDouyinPosts: () => call<DouyinPost[]>("list_douyin_posts"),
   getAutoSyncModerate: () => call<boolean>("get_auto_sync_moderate"),
   setAutoSyncModerate: (enabled: boolean) =>
