@@ -657,6 +657,114 @@ async function pickAiRecommendCover() {
   return false;
 }
 
+/** 视频备选封面点击脚本（同步瞬时）：超时预备方案用。
+ *  候选识别刻意避开类名依赖（曾踩 recommendCover 子串误匹配坑）：先以「智能推荐封面」
+ *  标题锚定 AI 区容器，找不到候选再以「设置封面」标题锚定槽位区容器（含 横封面|竖封面
+ *  标签文本的祖先）。候选项 = 容器内可见 img（naturalWidth/Height > 40，排除图标）且所属
+ *  项内无「生成中」文本（半成品排除）。点击第 1 项并打临时标记 data-pub-pick 供校验找回。
+ *  返回 {"picked":bool,"count":n}。 */
+function buildFrameCoverPickScript(cfg) {
+  return `(() => {
+    const K = ${JSON.stringify(cfg)};
+    const leafByText = (text) => {
+      for (const el of document.querySelectorAll("span,div")) {
+        if (el.children.length) continue;
+        if (el.offsetParent === null) continue;
+        if ((el.textContent || "").includes(text)) return el;
+      }
+      return null;
+    };
+    const scopeWithImg = (anchor) => {
+      let scope = anchor;
+      for (let i = 0; i < 6 && scope; i += 1) {
+        if (scope.querySelector && scope.querySelector("img")) return scope;
+        scope = scope.parentElement;
+      }
+      return null;
+    };
+    const slotScope = (anchor) => {
+      const slotRe = new RegExp(K.slotLabelPattern);
+      let scope = anchor;
+      for (let i = 0; i < 8 && scope; i += 1) {
+        if (slotRe.test(scope.textContent || "")) return scope;
+        scope = scope.parentElement;
+      }
+      return null;
+    };
+    const candidatesIn = (scope) => {
+      if (!scope) return [];
+      const imgs = [...scope.querySelectorAll("img")].filter(
+        (im) => im.offsetParent !== null && im.naturalWidth > 40 && im.naturalHeight > 40,
+      );
+      const items = [];
+      for (const im of imgs) {
+        // 候选项：向上找不含其他 img 的最小容器（单图项），跳过含「生成中」文本的半成品。
+        let item = im;
+        for (let i = 0; i < 4 && item.parentElement; i += 1) {
+          const p = item.parentElement;
+          if (p.querySelectorAll("img").length > 1) break;
+          item = p;
+        }
+        if ((item.textContent || "").includes(K.generatingPattern)) continue;
+        items.push(item);
+      }
+      return items;
+    };
+    let items = candidatesIn(scopeWithImg(leafByText(K.titlePattern)));
+    if (!items.length) items = candidatesIn(slotScope(leafByText(K.slotTitlePattern)));
+    if (!items.length) return JSON.stringify({ picked: false, count: 0 });
+    const t = items[0];
+    t.setAttribute("data-pub-pick", "1");
+    t.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    t.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    t.click();
+    return JSON.stringify({ picked: true, count: items.length });
+  })()`;
+}
+
+/** 降级点击后的选中态校验：data-pub-pick 标记项是否出现选中类名或 svg 勾。 */
+function buildFrameCoverVerifyScript() {
+  return `(() => {
+    const t = document.querySelector("[data-pub-pick='1']");
+    return JSON.stringify({
+      selected: !!t && (/select|check|active/i.test(String(t.className || "")) || !!t.querySelector("svg")),
+    });
+  })()`;
+}
+
+/** 超时预备方案：AI 推荐封面未生成（服务端超时/卡死）时，改选视频备选封面第 1 张。
+ *  校验两信号：主封面 img src 变化 / 点击项出现选中态；全不命中返回 false 提示人工，
+ *  不把「无法确认」当成功。 */
+async function pickVideoFrameCover() {
+  const verify = buildCoverVerifyScript(SELECTORS.aiCover);
+  const before = JSON.parse(
+    (await runOpencliRaw(["browser", session, "eval", verify]).catch(() => "{}")) || "{}",
+  );
+  const raw = await runOpencliRaw([
+    "browser", session, "eval", buildFrameCoverPickScript(SELECTORS.aiCover),
+  ]).catch(() => null);
+  let st = null;
+  try {
+    st = JSON.parse(raw || "");
+  } catch {
+    /* eval 往返异常按未选中处理 */
+  }
+  if (!st?.picked) return false;
+  await sleep(1500);
+  const after = JSON.parse(
+    (await runOpencliRaw(["browser", session, "eval", verify]).catch(() => "{}")) || "{}",
+  );
+  if (before.main && after.main && before.main !== after.main) return true;
+  const sel = await runOpencliRaw(["browser", session, "eval", buildFrameCoverVerifyScript()]).catch(
+    () => null,
+  );
+  try {
+    return JSON.parse(sel || "{}").selected === true;
+  } catch {
+    return false;
+  }
+}
+
 /** 「定时发布」radio 脚本（异步）：按可见文本精确匹配 label；已选中则不动。
  *  返回 'ready'（点击后已选中）/ 'already'（本已选中）/ 'no-radio' / 'radio-not-checked'。 */
 function buildSchedulePrepScript(cfg) {
@@ -761,7 +869,14 @@ async function fillComposer() {
   }
   // AI 智能推荐封面（慢步骤放最后：生成需数十秒，等到就绪再点选第 1 张；
   // 校验不过不盲目报成功，提示人工核对）。
-  const coverPicked = await pickAiRecommendCover();
+  let coverPicked = await pickAiRecommendCover();
+  // 超时预备方案：AI 封面一直没生成（服务端超时/卡死）时，降级改选右侧
+  // 视频备选封面（抖音自动抽帧生成的那几张，生成快、通常早已就绪）。
+  let coverFallback = false;
+  if (!coverPicked) {
+    coverPicked = await pickVideoFrameCover();
+    coverFallback = coverPicked;
+  }
   // AI 封面选中应用到一个槽位后，另一个方向（横/竖）的槽位封面会进入自动生成——
   // 等它也生成完再交还人工，避免确认窗弹出时槽位封面还是半成品。
   const slotsReady = coverPicked ? await waitCoverSlotsReady() : false;
@@ -773,7 +888,7 @@ async function fillComposer() {
     warns.push("自主声明未能自动完成，请人工点选：自主声明 → 内容为转载信息 → 取材站外 → 确定");
   }
   if (!coverPicked) {
-    warns.push("AI 推荐封面未自动选中，请人工在「设置封面」区点选第 1 张推荐封面");
+    warns.push("AI 推荐封面未生成，视频备选封面也未能自动选中，请人工在「设置封面」区点选封面");
   }
   if (coverPicked && !slotsReady) {
     warns.push("另一个方向的封面（横/竖）仍在自动生成中，请人工稍候核对");
@@ -785,7 +900,11 @@ async function fillComposer() {
     warns.push("未来 14 天每天都有作品、无空档日，请人工选择定时发布时间");
   }
   const declText = declState === "declared" ? "，自主声明已选【内容为转载信息/取材站外】" : "";
-  const coverText = coverPicked ? "，封面已选 AI 推荐第 1 张" : "";
+  const coverText = coverPicked
+    ? coverFallback
+      ? "，AI 封面未生成，已改选视频备选封面"
+      : "，封面已选 AI 推荐第 1 张"
+    : "";
   const schedText = schedSet ? `，定时发布已设为 ${job.scheduleTime}` : "";
   const warn = warns.length ? `；${warns.join("；")}` : "";
   writeProgress("form_filled", `标题/文案/话题已填写${declText}${coverText}${schedText}，请人工核对后点击页面上的【发布】${warn}`);
