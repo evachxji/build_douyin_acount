@@ -107,4 +107,22 @@ impl<'a> ContentRepo<'a> {
             .optional()?;
         Ok(row)
     }
+
+    /// 更新已生成文案的标题/正文（详情页双击编辑）；素材尚无文案时返回 None。
+    /// 话题不变；`prepare_publish` 每次现读文案建草稿，编辑自动生效于下一次发布。
+    pub fn update_text(
+        &self,
+        asset_id: i64,
+        title: &str,
+        body: &str,
+    ) -> Result<Option<ContentCopy>, DomainError> {
+        let changed = self.db.conn().execute(
+            "UPDATE content_copies SET title = ?2, body = ?3 WHERE asset_id = ?1",
+            params![asset_id, title, body],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.get_by_asset(asset_id)
+    }
 }

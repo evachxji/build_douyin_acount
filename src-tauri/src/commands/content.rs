@@ -41,6 +41,24 @@ pub fn get_copy(
         .map_err(ApiError::from)
 }
 
+/// 详情页双击编辑文案：更新已生成文案的标题/正文（话题不变）。
+/// 返回更新后的完整文案；素材尚无文案时报错（前端只在有文案时才开放编辑）。
+#[tauri::command]
+pub fn update_copy(
+    state: State<AppState>,
+    asset_id: i64,
+    title: String,
+    body: String,
+) -> Result<crate::domain::content::ContentCopy, ApiError> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err(DomainError::InvalidData("标题不能为空".to_string()).into());
+    }
+    ContentRepo::new(&state.db)
+        .update_text(asset_id, &title, body.trim())?
+        .ok_or_else(|| DomainError::InvalidData("该素材尚未生成文案".to_string()).into())
+}
+
 /// 推荐打分核心：质量分加权 + 点赞对数归一 + 作者多样性；写入 recommendations 表，
 /// 并为入选素材自动入队文案生成。抽出为纯函数便于测试。
 pub fn recommend(db: &crate::db::Database, style: &str) -> Result<serde_json::Value, DomainError> {

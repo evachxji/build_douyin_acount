@@ -29,6 +29,10 @@ export function DetailPanel() {
   const [publishingId, setPublishingId] = useState<number | null>(null);
   const [transition, setTransition] = useState<{ action: "approve" | "eliminate" } | null>(null);
   const [musicOpen, setMusicOpen] = useState(false);
+  // 双击编辑 AI 文案标题/正文：field 标记正在编辑哪一项，value 为编辑中的草稿文本。
+  const [editingCopy, setEditingCopy] = useState<{ field: "title" | "body"; value: string } | null>(null);
+  // Esc 取消时输入框 blur 会紧跟着触发提交，用此 ref 让 onBlur 跳过本次提交。
+  const editCancelledRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // 视频元素「代次」：添加音乐合成完成后 +1 强制 <video> 重挂载——二次合成时输出文件路径不变
   // （固定 <uuid>.music.mp4，file_path 不变 key 就不变），旧元素持有已被 ffmpeg 覆盖的文件，
@@ -62,7 +66,9 @@ export function DetailPanel() {
     }
     setAnalysis(null);
     setCopy(null);
-    // 切换素材时关掉可能还开着的添加音乐弹窗（弹窗绑定的是旧素材）。
+    // 切换素材时退出文案编辑态（编辑目标是旧素材的文案）。
+    setEditingCopy(null);
+    editCancelledRef.current = false;
     setMusicOpen(false);
     void api.getAnalysis(asset.id).then(setAnalysis).catch(() => setAnalysis(null));
     void api.getCopy(asset.id).then(setCopy).catch(() => setCopy(null));
@@ -274,6 +280,31 @@ export function DetailPanel() {
     }
   };
 
+  // 提交双击编辑的标题/正文：另一项取当前文案原值，话题保持不变。
+  // prepare_publish 每次现读文案建草稿，编辑自动生效于下一次「准备发布」。
+  const commitCopyEdit = async () => {
+    if (!asset || !copy || !editingCopy) return;
+    const title = editingCopy.field === "title" ? editingCopy.value : copy.title;
+    const body = editingCopy.field === "body" ? editingCopy.value : copy.body;
+    try {
+      const updated = await api.updateCopy(asset.id, title, body);
+      setCopy(updated);
+      setEditingCopy(null);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // 输入框失火统一出口：Esc 置过取消标记则跳过提交，否则保存。
+  const onEditBlur = () => {
+    if (editCancelledRef.current) {
+      editCancelledRef.current = false;
+      setEditingCopy(null);
+      return;
+    }
+    void commitCopyEdit();
+  };
+
   return (
     <aside className="relative flex min-w-0 flex-1 flex-col bg-panel/60">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -405,8 +436,56 @@ export function DetailPanel() {
         </div>
         {copy ? (
           <div className="mt-2 space-y-2 text-sm">
-            <p className="text-[13px] font-medium text-paper/90">{copy.title}</p>
-            {copy.body && <p className="text-[13px] leading-relaxed text-paper/75">{copy.body}</p>}
+            {editingCopy?.field === "title" ? (
+              <input
+                autoFocus
+                value={editingCopy.value}
+                onChange={(e) => setEditingCopy({ field: "title", value: e.target.value })}
+                onBlur={onEditBlur}
+                onKeyDown={(e) => {
+                  // Enter/Esc 统一走 blur 出口，避免保存与失焦提交双重触发。
+                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === "Escape") {
+                    editCancelledRef.current = true;
+                    e.currentTarget.blur();
+                  }
+                }}
+                className="w-full rounded border border-accent/50 bg-ink/40 px-2 py-1 text-[13px] font-medium text-paper outline-none"
+              />
+            ) : (
+              <p
+                onDoubleClick={() => setEditingCopy({ field: "title", value: copy.title })}
+                className="cursor-text text-[13px] font-medium text-paper/90"
+                title="双击编辑标题"
+              >
+                {copy.title}
+              </p>
+            )}
+            {copy.body &&
+              (editingCopy?.field === "body" ? (
+                <textarea
+                  autoFocus
+                  rows={4}
+                  value={editingCopy.value}
+                  onChange={(e) => setEditingCopy({ field: "body", value: e.target.value })}
+                  onBlur={onEditBlur}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      editCancelledRef.current = true;
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  className="w-full resize-y rounded border border-accent/50 bg-ink/40 px-2 py-1 text-[13px] leading-relaxed text-paper outline-none"
+                />
+              ) : (
+                <p
+                  onDoubleClick={() => setEditingCopy({ field: "body", value: copy.body })}
+                  className="cursor-text whitespace-pre-wrap text-[13px] leading-relaxed text-paper/75"
+                  title="双击编辑正文"
+                >
+                  {copy.body}
+                </p>
+              ))}
             {copy.hashtags.length > 0 && (
               <p className="text-xs text-accent">
                 {copy.hashtags.map((h) => `#${h}`).join(" ")}

@@ -124,6 +124,7 @@ pub fn run() {
             commands::music::ensure_music_covers,
             commands::content::generate_copy,
             commands::content::get_copy,
+            commands::content::update_copy,
             commands::content::get_recommendations,
             commands::publish::prepare_publish,
             commands::publish::list_drafts,

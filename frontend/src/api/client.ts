@@ -96,6 +96,8 @@ export const api = {
   openUrl: (url: string) => call<void>("open_url", { url }),
   generateCopy: (assetId: number) => call<number>("generate_copy", { assetId }),
   getCopy: (assetId: number) => call<ContentCopy | null>("get_copy", { assetId }),
+  updateCopy: (assetId: number, title: string, body: string) =>
+    call<ContentCopy>("update_copy", { assetId, title, body }),
   checkOllama: () => call<boolean>("check_ollama"),
   startOllama: () => call<void>("start_ollama"),
 

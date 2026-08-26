@@ -1,4 +1,4 @@
-﻿//! Content Agent + 推荐器测试：假 LLM 生成文案、打分推荐写库并入队文案生成。
+//! Content Agent + 推荐器测试：假 LLM 生成文案、打分推荐写库并入队文案生成。
 use std::sync::Arc;
 
 use build_douyin_acount_lib::agents::content::{ContentAgent, CopyGenerator};
@@ -175,6 +175,33 @@ fn recommender_scores_groups_and_enqueues_copy_tasks() {
         .filter(|t| t.agent_name == "content")
         .count();
     assert_eq!(content_tasks, 3);
+}
+
+#[test]
+fn update_text_edits_title_and_body_keeps_hashtags() {
+    let db = test_db();
+    let asset_id = insert_asset(&db, "猫咪打哈欠", "cat", 0);
+    let repo = ContentRepo::new(&db);
+    repo.upsert(build_douyin_acount_lib::domain::content::NewContentCopy {
+        asset_id,
+        style_id: None,
+        title: "原标题".to_string(),
+        body: "原正文".to_string(),
+        hashtags: vec!["萌宠".to_string()],
+    })
+    .expect("upsert");
+
+    let updated = repo
+        .update_text(asset_id, "新标题", "新正文")
+        .expect("update")
+        .expect("copy exists");
+    assert_eq!(updated.title, "新标题");
+    assert_eq!(updated.body, "新正文");
+    assert_eq!(updated.hashtags, vec!["萌宠".to_string()]);
+
+    // 素材无文案时返回 None（前端只在已有文案时开放编辑）
+    let other_id = insert_asset(&db, "无文案", "dog", 0);
+    assert!(repo.update_text(other_id, "x", "y").expect("update").is_none());
 }
 
 #[test]
