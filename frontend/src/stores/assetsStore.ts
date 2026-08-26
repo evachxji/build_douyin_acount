@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api } from "../api/client";
 import type { FilterState, LibraryOverview, VideoAsset } from "../api/types";
-import { buildAssetFilter } from "./helpers";
+import { buildAssetFilter, loadPersistedFilterStatus, persistFilterStatus } from "./helpers";
 
 interface AssetsState {
   assets: VideoAsset[];
@@ -17,10 +17,13 @@ interface AssetsState {
   analyzeSelected: (ids: number[]) => Promise<number>;
 }
 
-export const useAssetsStore = create<AssetsState>((set, get) => ({
+export const useAssetsStore = create<AssetsState>((set, get) => {
+  // 初始状态筛选恢复上次退出前停留的选项（无记录 = 全部）。
+  const persistedStatus = loadPersistedFilterStatus();
+  return {
   assets: [],
   overview: null,
-  filter: {},
+  filter: persistedStatus ? { status: persistedStatus } : {},
   loading: false,
   error: null,
 
@@ -39,6 +42,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   setFilter: async (patch) => {
     set((s) => ({ filter: { ...s.filter, ...patch } }));
+    // 状态筛选跨重启记忆；平台/搜索不持久化（易过期的临时条件）。
+    if ("status" in patch) persistFilterStatus(patch.status);
     await get().load();
   },
 
@@ -69,4 +74,5 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     await get().load();
     return enqueued.length;
   },
-}));
+  };
+});

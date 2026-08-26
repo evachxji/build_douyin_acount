@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildAssetFilter, selectionReducer } from "./helpers";
+import {
+  buildAssetFilter,
+  loadPersistedFilterStatus,
+  persistFilterStatus,
+  selectionReducer,
+} from "./helpers";
 
 describe("selectionReducer", () => {
   it("toggles ids and clears the set", () => {
@@ -34,5 +39,28 @@ describe("buildAssetFilter", () => {
   it("maps 待处理(NEW) to NEW+ANALYZING and other statuses to a single entry", () => {
     expect(buildAssetFilter({ status: "NEW" }).statuses).toEqual(["NEW", "ANALYZING"]);
     expect(buildAssetFilter({ status: "CANDIDATE" }).statuses).toEqual(["CANDIDATE"]);
+  });
+});
+
+/** Map 实现的假 Storage，避免测试环境依赖 localStorage。 */
+function fakeStorage() {
+  const map = new Map<string, string>();
+  return {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, v),
+    removeItem: (k: string) => void map.delete(k),
+  };
+}
+
+describe("filter status persistence", () => {
+  it("remembers the last status and clears it when back to 全部(undefined)", () => {
+    const storage = fakeStorage();
+    expect(loadPersistedFilterStatus(storage)).toBeUndefined();
+
+    persistFilterStatus("CANDIDATE", storage);
+    expect(loadPersistedFilterStatus(storage)).toBe("CANDIDATE");
+
+    persistFilterStatus(undefined, storage);
+    expect(loadPersistedFilterStatus(storage)).toBeUndefined();
   });
 });
