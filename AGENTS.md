@@ -5,7 +5,7 @@ Windows desktop app (Tauri 2 + Rust) collecting short videos from TikTok / Insta
 ## Project Structure & Module Organization
 
 - `frontend/` - React 18 + TypeScript + TailwindCSS (Vite). UI only; IPC goes through `src/api/client.ts`, state in Zustand stores under `src/stores/`.
-- `src-tauri/` - Rust backend with all business logic: `commands/` (IPC), `agents/` (task orchestration), `analysis/` (pipeline), `db/` (SQLite + migrations), `domain/` (models, state machine). Integration tests in `tests/`, examples in `examples/`.
+- `src-tauri/` - Rust backend with all business logic: `commands/` (IPC), `agents/` (task orchestration), `analysis/` (pipeline), `db/` (SQLite + migrations), `domain/` (models, state machine), `media/`; top-level modules include `auto_sync.rs`, `backup.rs`, `music_covers.rs`, `music_mix.rs`, `music_sync.rs`, `tools.rs`, `whisper_models.rs`, `settings.rs`, `state.rs`. Integration tests in `tests/`, examples in `examples/`.
 - `scripts/` - Node/Python sidecars spawned by Rust agents: `collector/`, `douyin-publisher/`, `douyin-sync/`, `whisper-server/`.
 - `resources/prompts/` - AI prompt templates; `docs/` - design docs (01-05); `storage/` - runtime data, gitignored.
 
@@ -44,5 +44,5 @@ pnpm build                # tsc + Vite build (no ESLint)
 ## Agent-Specific Instructions
 
 - Read `CLAUDE.md` before touching business logic; it records architecture contracts and pitfalls.
-- Never automate clicking Douyin's final publish button; publishing stays human-confirmed.
+- Publishing stays human-in-the-loop: the sidecar may click Douyin's publish button only once per task and only after explicit in-app authorization (the user checks ✓ on that single task); no automatic/scheduled/batch/unattended publish-click path may exist. See `CLAUDE.md` security red lines for details.
 - PowerShell inline scripts with Chinese text break under GBK; write them to files and read UTF-8 docs with `Get-Content -Encoding UTF8`.
