@@ -43,3 +43,8 @@ tempfile = "3"
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# 只保留行号级调试信息（backtrace 可用），去掉变量级调试信息——
+# 默认 debug = true 会让 deps 堆出 20GB+ PDB，参见 target 目录体积问题
+[profile.dev]
+debug = 1
