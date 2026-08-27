@@ -138,6 +138,7 @@ pub fn run() {
             commands::settings::update_settings,
             commands::ollama::check_ollama,
             commands::ollama::start_ollama,
+            commands::cloud_models::list_cloud_models,
             commands::whisper_models::list_whisper_models,
             commands::whisper_models::start_whisper_download,
             commands::whisper_models::cancel_whisper_download,

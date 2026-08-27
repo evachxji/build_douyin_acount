@@ -108,6 +108,8 @@ export const api = {
     call<ContentCopy>("update_copy", { assetId, title, body }),
   checkOllama: () => call<boolean>("check_ollama"),
   startOllama: () => call<void>("start_ollama"),
+  listCloudModels: (baseUrl: string, apiKey: string) =>
+    call<string[]>("list_cloud_models", { baseUrl, apiKey }),
   getYtdlpStatus: () => call<YtDlpStatus>("get_ytdlp_status"),
   checkYtdlpUpdate: () => call<YtDlpUpdateInfo>("check_ytdlp_update"),
   updateYtdlp: () => call<void>("update_ytdlp"),

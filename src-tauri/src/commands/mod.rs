@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod assets;
 pub mod backup;
+pub mod cloud_models;
 pub mod collection;
 pub mod content;
 pub mod douyin;
