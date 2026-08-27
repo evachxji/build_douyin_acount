@@ -3,17 +3,15 @@ use tauri::{Manager, State};
 
 use crate::domain::error::{ApiError, DomainError};
 use crate::music_mix::{self, MusicApplyResult};
-use crate::music_sync::{self, MusicFile, SyncReport};
+use crate::music_sync::{self, MusicFile};
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct MusicStatus {
-    /// 已同步到本地音乐目录的音频文件数。
+    /// 音乐库目录里的音频文件数（「曲库 N 首」口径）。
     pub count: u32,
     /// 本地音乐目录绝对路径（storage/music）。
     pub dir: String,
-    /// 本机是否存在剪映音乐缓存（未安装剪映/从未下载音乐时为 false）。
-    pub cache_found: bool,
 }
 
 fn status(store: &crate::media::MediaStore) -> MusicStatus {
@@ -21,9 +19,6 @@ fn status(store: &crate::media::MediaStore) -> MusicStatus {
     MusicStatus {
         count: music_sync::count_music_files(&dir),
         dir: dir.to_string_lossy().into_owned(),
-        cache_found: music_sync::jianying_cache_root()
-            .map(|root| root.join("music").is_dir())
-            .unwrap_or(false),
     }
 }
 
@@ -34,7 +29,7 @@ pub fn get_music_status(state: State<AppState>) -> MusicStatus {
 }
 
 /// 列出音乐库全部音频文件（添加音乐弹窗的数据源），并联出已匹配的专辑封面与所属分类
-/// （分类来自 music_categories 表——音乐库采集落库；剪映缓存同步来的歌无分类，弹窗归「未分类」）。
+/// （分类来自 music_categories 表——音乐库采集落库；无分类的歌（如手动放入目录的）弹窗归「未分类」）。
 #[tauri::command]
 pub fn list_music_files(state: State<AppState>) -> Vec<MusicFile> {
     let mut files = music_sync::list_music(&state.store.music_dir());
@@ -54,7 +49,7 @@ pub fn list_music_files(state: State<AppState>) -> Vec<MusicFile> {
 }
 
 /// 为缺封面的音乐增量匹配专辑封面（iTunes Search API，免 key）。
-/// 增量：已有封面/7 天内查过未找到的跳过，只查新增或缺失的几首，不拖慢同步。
+/// 增量：已有封面/7 天内查过未找到的跳过，只查新增或缺失的几首，不拖慢采集。
 #[tauri::command]
 pub async fn ensure_music_covers(
     state: State<'_, AppState>,
@@ -95,30 +90,6 @@ pub async fn add_music_to_video(
     })
     .await
     .unwrap_or_else(|e| Err(DomainError::InvalidData(format!("合成线程异常: {e}"))))
-    .map_err(ApiError::from)
-}
-
-/// 一键同步剪映缓存音乐到本地音乐目录。复制+MD5 全量比对可能数秒，
-/// 走 spawn_blocking 不占主线程，前端按钮 loading 等待结果即可（无需进度轮询）。
-/// 同步同时把剪映缓存里的精确封面 URL 落 music_covers 表（URL_READY），
-/// 前端随后调 ensure_music_covers 下载（已有封面的不动，不重复下载）。
-#[tauri::command]
-pub async fn sync_music(app: tauri::AppHandle) -> Result<SyncReport, ApiError> {
-    let state = app.state::<AppState>();
-    let store = state.store.clone();
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let cache_root = music_sync::jianying_cache_root().ok_or_else(|| {
-            DomainError::InvalidData("未找到剪映音乐缓存（需要本机安装剪映专业版并下载过音乐）".to_string())
-        })?;
-        let report = music_sync::sync(&cache_root, &store.music_dir())?;
-        for (file_name, url) in &report.cover_urls {
-            crate::music_covers::upsert_exact_url(&db, file_name, url)?;
-        }
-        Ok(report)
-    })
-    .await
-    .unwrap_or_else(|e| Err(DomainError::InvalidData(format!("同步线程异常: {e}"))))
     .map_err(ApiError::from)
 }
 

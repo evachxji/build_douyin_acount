@@ -211,22 +211,12 @@ export interface CachedFfmpegUpdate {
   info: FfmpegUpdateInfo | null;
 }
 
-/** 剪映音乐库本地状态（storage/music）。 */
+/** 音乐库本地状态（storage/music）。 */
 export interface MusicStatus {
-  /** 已同步到本地音乐目录的音频文件数。 */
+  /** 音乐库目录里的音频文件数（「曲库 N 首」口径）。 */
   count: number;
   /** 本地音乐目录绝对路径。 */
   dir: string;
-  /** 本机是否存在剪映音乐缓存。 */
-  cache_found: boolean;
-}
-
-/** 剪映音乐一键同步结果。 */
-export interface MusicSyncResult {
-  copied: number;
-  skipped: number;
-  /** 未匹配歌名而跳过（未复制）的文件数。 */
-  unmatched: number;
 }
 
 /** 音乐库文件（添加音乐弹窗列表项）。 */

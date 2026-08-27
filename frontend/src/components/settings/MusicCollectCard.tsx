@@ -6,21 +6,30 @@ import { formatBytes } from "../../lib/format";
 const TERMINAL = new Set(["done", "stopped", "error", "interrupted"]);
 type Phase = "idle" | "starting" | "running" | "stopping";
 
-/** 音乐库批量采集卡片（设置页「剪映音乐」下方）：从剪映线上音乐库按分类各采 N 首
- *  到本地音乐库（不依赖剪映客户端）。专用线程 + progress 文件轮询（1.5s，非 idle 期间）；
- *  可停止、幂等续采；完成后自动触发封面补下载并回调父组件刷新音乐计数。
- *  状态机：idle → starting（启动中 loading，等后端初始进度）→ running（显示进度）；
- *  轮询拿到终态回 idle。挂载时若采集正在进行（重开设置页）自动接续进度显示。 */
-export function MusicCollectCard({ onChanged }: { onChanged?: () => void }) {
+/** 音乐库批量采集卡片（设置页）：从剪映线上音乐库按分类各采 N 首到本地音乐库
+ * （不依赖剪映客户端）。专用线程 + progress 文件轮询（1.5s，非 idle 期间）；
+ * 可停止、幂等续采；完成后自动触发封面补下载并刷新「曲库 N 首」计数。
+ * 状态机：idle → starting（启动中 loading，等后端初始进度）→ running（显示进度）；
+ * 轮询拿到终态回 idle。挂载时若采集正在进行（重开设置页）自动接续进度显示。 */
+export function MusicCollectCard() {
   const [perCategory, setPerCategory] = useState(50);
   const [progress, setProgress] = useState<MusicCollectProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [musicCount, setMusicCount] = useState<number | null>(null);
   // 完成后的封面补下载 + 计数刷新只触发一次（以 updated_at 去重）。
   const doneHandledFor = useRef<number>(0);
 
+  const refreshCount = () => {
+    void api
+      .getMusicStatus()
+      .then((s) => setMusicCount(s.count))
+      .catch(() => setMusicCount(null));
+  };
+
   // 挂载时读一次：采集正在进行（重开设置页/另一入口发起）→ 接续轮询显示进度。
   useEffect(() => {
+    refreshCount();
     void api
       .musicCollectStatus()
       .then((p) => {
@@ -60,15 +69,15 @@ export function MusicCollectCard({ onChanged }: { onChanged?: () => void }) {
     };
   }, [phase]);
 
-  // 采集结束（done/stopped）且有实际下载 → 补封面 + 通知父组件刷新「已同步 N 首」。
+  // 采集结束（done/stopped）且有实际下载 → 补封面 + 刷新「曲库 N 首」。
   useEffect(() => {
     if (!progress || (progress.stage !== "done" && progress.stage !== "stopped")) return;
     if (progress.downloaded === 0) return;
     if (doneHandledFor.current === progress.updated_at) return;
     doneHandledFor.current = progress.updated_at;
     void api.ensureMusicCovers().catch(() => {});
-    onChanged?.();
-  }, [progress, onChanged]);
+    refreshCount();
+  }, [progress]);
 
   const start = async () => {
     setError(null);
@@ -98,6 +107,15 @@ export function MusicCollectCard({ onChanged }: { onChanged?: () => void }) {
     }
   };
 
+  const openDir = async () => {
+    setError(null);
+    try {
+      await api.openMusicDir();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const percent =
     progress && progress.planned_total > 0
       ? Math.min(
@@ -114,6 +132,7 @@ export function MusicCollectCard({ onChanged }: { onChanged?: () => void }) {
       <div className="flex items-center justify-between">
         <p className="flex items-center text-xs text-mute">
           <span className="font-semibold uppercase tracking-wider">音乐库采集</span>
+          <span className="ml-3">曲库：{musicCount === null ? "…" : `${musicCount} 首`}</span>
           <span className="ml-3" title="从剪映线上音乐库按分类批量下载（不依赖剪映客户端）">
             按剪映分类各采
           </span>
@@ -130,44 +149,53 @@ export function MusicCollectCard({ onChanged }: { onChanged?: () => void }) {
           />
           <span>首</span>
         </p>
-        {phase === "idle" && (
+        <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => void start()}
-            className="h-7 rounded border border-accent bg-accent px-3 text-xs font-semibold text-ink hover:brightness-110"
+            onClick={() => void openDir()}
+            className="h-7 rounded border border-line px-3 text-xs text-mute hover:text-paper"
           >
-            开始采集
+            打开目录
           </button>
-        )}
-        {phase === "starting" && (
-          <button
-            type="button"
-            disabled
-            className="inline-flex h-7 items-center gap-1.5 rounded border border-accent bg-accent px-3 text-xs font-semibold text-ink opacity-70"
-          >
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-ink/40 border-t-ink" />
-            启动中…
-          </button>
-        )}
-        {phase === "running" && (
-          <button
-            type="button"
-            onClick={() => void stop()}
-            className="h-7 rounded border border-bad/50 px-3 text-xs font-semibold text-bad hover:bg-bad/10"
-          >
-            停止
-          </button>
-        )}
-        {phase === "stopping" && (
-          <button
-            type="button"
-            disabled
-            className="inline-flex h-7 items-center gap-1.5 rounded border border-bad/50 px-3 text-xs font-semibold text-bad opacity-70"
-          >
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-bad/40 border-t-bad" />
-            停止中…
-          </button>
-        )}
+          {phase === "idle" && (
+            <button
+              type="button"
+              onClick={() => void start()}
+              className="h-7 rounded border border-accent bg-accent px-3 text-xs font-semibold text-ink hover:brightness-110"
+            >
+              开始采集
+            </button>
+          )}
+          {phase === "starting" && (
+            <button
+              type="button"
+              disabled
+              className="inline-flex h-7 items-center gap-1.5 rounded border border-accent bg-accent px-3 text-xs font-semibold text-ink opacity-70"
+            >
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-ink/40 border-t-ink" />
+              启动中…
+            </button>
+          )}
+          {phase === "running" && (
+            <button
+              type="button"
+              onClick={() => void stop()}
+              className="h-7 rounded border border-bad/50 px-3 text-xs font-semibold text-bad hover:bg-bad/10"
+            >
+              停止
+            </button>
+          )}
+          {phase === "stopping" && (
+            <button
+              type="button"
+              disabled
+              className="inline-flex h-7 items-center gap-1.5 rounded border border-bad/50 px-3 text-xs font-semibold text-bad opacity-70"
+            >
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-bad/40 border-t-bad" />
+              停止中…
+            </button>
+          )}
+        </div>
       </div>
 
       {progress && (

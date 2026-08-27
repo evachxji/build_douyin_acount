@@ -1,5 +1,5 @@
-//! 音乐专辑封面匹配：同步后为每首音乐抓取封面，三级回退——
-//! 1. 剪映缓存精确封面（同步时从 ressdk_db 提取的抖音音乐库原图，1080×1080，精确匹配）；
+//! 音乐专辑封面匹配：为音乐库每首音乐抓取封面，三级回退——
+//! 1. 音乐库采集拿到的精确封面（抖音音乐库原图，1080×1080，精确匹配）；
 //! 2. QQ 音乐搜索（免登录公开接口，中文歌覆盖最好）；
 //! 3. iTunes Search API（免 key，兜底）。
 //!
@@ -112,7 +112,7 @@ fn upsert_row(
     Ok(())
 }
 
-/// 同步时写入精确封面 URL（剪映缓存里抖音音乐库原图）。
+/// 采集时写入精确封面 URL（抖音音乐库原图）。
 /// 已有 FOUND 的行不动（避免重复下载）；其余一律置为 URL_READY 等 ensure_covers 下载。
 pub fn upsert_exact_url(db: &Database, file_name: &str, url: &str) -> Result<(), DomainError> {
     db.conn().execute(

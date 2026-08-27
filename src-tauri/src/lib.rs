@@ -118,7 +118,6 @@ pub fn run() {
             commands::douyin::moderate_all_violations,
             commands::douyin::open_url,
             commands::music::get_music_status,
-            commands::music::sync_music,
             commands::music::open_music_dir,
             commands::music::list_music_files,
             commands::music::add_music_to_video,

@@ -385,8 +385,8 @@ export function AddMusicDialog({
               ) : filtered.length === 0 ? (
                 (files?.length ?? 0) === 0 ? (
                   <p className="rounded border border-line p-4 text-xs text-mute">
-                    音乐库为空：到「设置 → 音乐库采集」按分类批量下载，或「设置 → 剪映音乐」
-                    一键同步本机剪映缓存，也可以直接把音频文件放进 storage/music 目录。
+                    音乐库为空：到「设置 → 音乐库采集」按剪映分类批量下载，或直接把音频文件
+                    放进 storage/music 目录。
                   </p>
                 ) : keyword !== "" ? (
                   <p className="rounded border border-line p-4 text-xs text-mute">

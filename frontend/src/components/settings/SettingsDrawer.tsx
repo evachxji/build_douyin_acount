@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
-import type { AiProvider, AppSettings, FfmpegStatus, FfmpegUpdateInfo, FfmpegUpdateProgress, MusicStatus, WhisperModelInfo, YtDlpStatus, YtDlpUpdateInfo, YtDlpUpdateProgress } from "../../api/types";
+import type { AiProvider, AppSettings, FfmpegStatus, FfmpegUpdateInfo, FfmpegUpdateProgress, WhisperModelInfo, YtDlpStatus, YtDlpUpdateInfo, YtDlpUpdateProgress } from "../../api/types";
 import { cleanConditions, formatBytes, formatSpeed } from "../../lib/format";
 import { WhisperModelDialog } from "./WhisperModelDialog";
 import { WhisperModelManager } from "./WhisperModelManager";
@@ -369,9 +369,6 @@ export function SettingsDrawer({
   const [ffmpegCheckFailed, setFfmpegCheckFailed] = useState(false);
   const [ffmpegProgress, setFfmpegProgress] = useState<FfmpegUpdateProgress | null>(null);
   const [ffmpegMsg, setFfmpegMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [musicStatus, setMusicStatus] = useState<MusicStatus | null>(null);
-  const [musicSyncing, setMusicSyncing] = useState(false);
-  const [musicMsg, setMusicMsg] = useState<{ ok: boolean; text: string } | null>(null);
   // 更新下载/校验进行中（后台线程执行，前端轮询进度——UI 全程不阻塞）。
   const ytdlpActive =
     ytdlpProgress !== null &&
@@ -492,11 +489,9 @@ export function SettingsDrawer({
       setFfmpegLatest(null);
       setFfmpegCheckFailed(false);
       setFfmpegMsg(null);
-      setMusicMsg(null);
       void api.getSettings().then(setSettings).catch((e) => setError(String(e)));
       void api.getYtdlpStatus().then(setYtdlpStatus).catch(() => setYtdlpStatus(null));
       void api.getFfmpegStatus().then(setFfmpegStatus).catch(() => setFfmpegStatus(null));
-      void api.getMusicStatus().then(setMusicStatus).catch(() => setMusicStatus(null));
       // 只读每日检查缓存（每天启动时已后台静默检查，这里不联网）。
       void loadCachedYtdlpUpdate();
       void loadCachedFfmpegUpdate();
@@ -595,45 +590,6 @@ export function SettingsDrawer({
       setFfmpegProgress({ stage: "downloading", downloaded: 0, total: 0, speed_bps: 0, message: "" });
     } catch (e) {
       setFfmpegMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
-    }
-  };
-
-  // 一键同步剪映音乐：后端 spawn_blocking 全量比对（秒级），按钮 loading 等结果。
-  // 随后增量匹配专辑封面（只查新增的几首，不重复下载已有封面）；封面失败不影响同步结果。
-  const syncMusic = async () => {
-    setMusicMsg(null);
-    setMusicSyncing(true);
-    try {
-      const r = await api.syncMusic();
-      const syncText = `同步完成：新复制 ${r.copied} 首，已存在跳过 ${r.skipped} 首${
-        r.unmatched > 0 ? `（${r.unmatched} 首未匹配歌名，已跳过）` : ""
-      }`;
-      setMusicMsg({ ok: true, text: `${syncText}；正在匹配专辑封面…` });
-      try {
-        const c = await api.ensureMusicCovers();
-        setMusicMsg({
-          ok: true,
-          text: `${syncText}；封面新匹配 ${c.downloaded} 张${
-            c.not_found > 0 ? `，${c.not_found} 首未找到` : ""
-          }`,
-        });
-      } catch {
-        setMusicMsg({ ok: true, text: `${syncText}（封面匹配失败，下次同步自动重试）` });
-      }
-      void api.getMusicStatus().then(setMusicStatus).catch(() => {});
-    } catch (e) {
-      setMusicMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setMusicSyncing(false);
-    }
-  };
-
-  const openMusicDir = async () => {
-    setMusicMsg(null);
-    try {
-      await api.openMusicDir();
-    } catch (e) {
-      setMusicMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -974,53 +930,9 @@ export function SettingsDrawer({
               </div>
             )}
           </div>
-          {/* 剪映音乐：一键同步本机剪映缓存到 storage/music；数量并入标题行（常态单行），
-              同步结果/错误才展开第二行。未找到缓存时禁用同步按钮 */}
-          <div className="col-span-2 rounded border border-sky-400/30 bg-sky-400/10 p-3">
-            <div className="flex items-center justify-between">
-              <p className="flex items-center text-xs text-mute">
-                <span className="font-semibold uppercase tracking-wider">剪映音乐</span>
-                <span className="ml-3">
-                  已同步：{musicStatus === null ? "读取中…" : `${musicStatus.count} 首`}
-                </span>
-                {musicStatus && !musicStatus.cache_found && (
-                  <span
-                    className="ml-2 text-mute/70"
-                    title="需安装剪映专业版并在剪映里下载过音乐"
-                  >
-                    未找到剪映缓存
-                  </span>
-                )}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void openMusicDir()}
-                  className="h-7 rounded border border-line px-3 text-xs text-mute hover:text-paper"
-                >
-                  打开目录
-                </button>
-                <button
-                  type="button"
-                  disabled={musicSyncing || !musicStatus?.cache_found}
-                  onClick={() => void syncMusic()}
-                  className="h-7 rounded border border-accent bg-accent px-3 text-xs font-semibold text-ink hover:brightness-110 disabled:opacity-50"
-                >
-                  {musicSyncing ? "同步中…" : "一键同步"}
-                </button>
-              </div>
-            </div>
-            {musicMsg && (
-              <div className="mt-2 space-y-1 text-xs text-mute">
-                <p className={musicMsg.ok ? "text-emerald-400" : "text-bad"}>{musicMsg.text}</p>
-              </div>
-            )}
-          </div>
           {/* 音乐库采集：从剪映线上音乐库按分类批量下载（不依赖剪映客户端），
-              完成后刷新上方「已同步 N 首」计数 */}
-          <MusicCollectCard
-            onChanged={() => void api.getMusicStatus().then(setMusicStatus).catch(() => {})}
-          />
+              曲库计数/进度/打开目录都在卡片内自洽 */}
+          <MusicCollectCard />
           <ConditionTags
             hit={settings.hit_conditions}
             exclude={settings.exclude_conditions}

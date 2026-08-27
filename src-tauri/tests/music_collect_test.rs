@@ -372,3 +372,63 @@ fn collect_errors_when_collections_fetch_fails() {
     assert!(r.is_err());
     assert_eq!(read_progress(&pp).stage, "error");
 }
+
+#[test]
+fn collect_appends_suffix_for_same_name_different_content() {
+    // 两首不同 song_id 的歌同名同作者（音频内容不同）→ 第二首落「 (2)」序号而非覆盖/跳过。
+    let (_tmp, db, store, pp) = test_env();
+    let pages = HashMap::from([(
+        (CAT1, 0),
+        (
+            serde_json::json!([
+                song_json(S1, "同名歌", "某作者"),
+                song_json(S2, "同名歌", "某作者"),
+            ]),
+            false,
+            2,
+        ),
+    )]);
+    let mock = start_mock(
+        serde_json::json!([{"id": CAT1, "name": "会员热榜"}]),
+        pages,
+        standard_audios(),
+        HashSet::new(),
+        None,
+    );
+    let cancel = AtomicBool::new(false);
+    run_collect(&db, &store, 5, &mock.url, &pp, &cancel).expect("run_collect");
+
+    assert!(store.music_dir().join("同名歌 - 某作者.m4a").is_file());
+    assert!(store.music_dir().join("同名歌 - 某作者 (2).m4a").is_file());
+    let rows = mapping_rows(&db);
+    assert_eq!(rows.len(), 2, "两首同名不同内容的歌都要落映射");
+}
+
+#[test]
+fn collect_sanitizes_illegal_chars_in_title() {
+    // 歌名含路径非法字符 → 清洗为 _；无作者时只留歌名。
+    let (_tmp, db, store, pp) = test_env();
+    let pages = HashMap::from([(
+        (CAT1, 0),
+        (
+            serde_json::json!([
+                song_json(S1, "a/b:c*d?e\"f<g>h|i", "戊"),
+                song_json(S2, ".. 孤勇者 . ", ""),
+            ]),
+            false,
+            2,
+        ),
+    )]);
+    let mock = start_mock(
+        serde_json::json!([{"id": CAT1, "name": "会员热榜"}]),
+        pages,
+        standard_audios(),
+        HashSet::new(),
+        None,
+    );
+    let cancel = AtomicBool::new(false);
+    run_collect(&db, &store, 5, &mock.url, &pp, &cancel).expect("run_collect");
+
+    assert!(store.music_dir().join("a_b_c_d_e_f_g_h_i - 戊.m4a").is_file());
+    assert!(store.music_dir().join("孤勇者.m4a").is_file());
+}
