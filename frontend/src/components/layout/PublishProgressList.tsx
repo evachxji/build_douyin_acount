@@ -4,9 +4,10 @@ import { useTaskStore } from "../../stores/taskStore";
 import type { AgentTask } from "../../api/types";
 
 /** 发布中列表（侧栏下方）：每个活跃发布任务一行，支持多任务并行。
- *  填表完成前转圈（处理中）；表单就绪（stage=form_ready）后变为 ✓/✕——
- *  点 ✓ 授权 sidecar 在页面代点一次发布按钮（直接生效，无二次确认）；
- *  点 ✕ 取消发布。用户自行在浏览器点发布同样会被检测登记。 */
+ *  填表完成前转圈（处理中）；表单就绪（stage=form_ready）后变为 ✓+转圈结束——
+ *  点 ✓ 授权 sidecar 在页面代点一次发布按钮（直接生效，无二次确认）。
+ *  ✕ 全程可见（loading 期间在转圈左侧）：任何时刻点 ✕ 即取消发布任务。
+ *  用户自行在浏览器点发布同样会被检测登记。 */
 export function PublishProgressList() {
   const tasks = useTaskStore((s) => s.tasks);
   const cancel = useTaskStore((s) => s.cancel);
@@ -82,24 +83,23 @@ export function PublishProgressList() {
           return (
             <li key={t.id} className="rounded px-1 py-1 hover:bg-white/5">
               <div className="flex items-center gap-1.5">
-                {ready && !busy ? (
-                  <>
-                    <button
-                      onClick={() => void authorize(t)}
-                      title="确认发布：页面将自动点击【发布】按钮"
-                      className="shrink-0 rounded border border-accent/60 px-1.5 py-0.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/15"
-                    >
-                      ✓
-                    </button>
-                    <button
-                      onClick={() => void cancel(t.id)}
-                      title="取消发布"
-                      className="shrink-0 rounded border border-bad/50 px-1.5 py-0.5 text-[11px] font-medium text-bad transition-colors hover:bg-bad/10"
-                    >
-                      ✕
-                    </button>
-                  </>
-                ) : (
+                {ready && !busy && (
+                  <button
+                    onClick={() => void authorize(t)}
+                    title="确认发布：页面将自动点击【发布】按钮"
+                    className="shrink-0 rounded border border-accent/60 px-1.5 py-0.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/15"
+                  >
+                    ✓
+                  </button>
+                )}
+                <button
+                  onClick={() => void cancel(t.id)}
+                  title="取消发布"
+                  className="shrink-0 rounded border border-bad/50 px-1.5 py-0.5 text-[11px] font-medium text-bad transition-colors hover:bg-bad/10"
+                >
+                  ✕
+                </button>
+                {(!ready || busy) && (
                   <span
                     className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-mute/40 border-t-accent"
                     title={busy ? "发布提交中…" : "发布准备中…"}
