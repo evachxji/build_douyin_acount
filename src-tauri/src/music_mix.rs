@@ -3,7 +3,7 @@
 //! 合成语义：
 //! - 视频流 copy 不重编码（秒级完成）；音频统一重编码 AAC 192k。
 //! - 音乐用 `-t <视频时长>` 裁到视频长度（音乐更短时尾部自然静音，不做循环）。
-//! - 「关闭原声」或视频本身无音轨：音乐直接铺底；
+//! - 「关闭原声」或视频本身无音轨：音乐按音乐音量滑条铺底（原声滑条不生效）；
 //!   否则原声与音乐按用户滑条音量（百分比，默认 30%/70%）混音，alimiter 防叠加削波。
 //! - 再次合成从原始视频重来（`music_info.origin_file_path`），不会叠音；
 //!   输出固定 `videos/<原stem>.music.mp4` 幂等覆盖。
@@ -56,11 +56,11 @@ fn has_audio_stream(path: &Path) -> Result<bool, DomainError> {
 /// 混音选项（对应弹窗的「关闭原声」开关与两个音量滑条）。
 #[derive(Debug, Clone, Copy)]
 pub struct MixOptions {
-    /// 关闭原声（源视频无音轨时同效退化）：音乐直接铺底，两个音量滑条不生效。
+    /// 关闭原声（源视频无音轨时同效退化）：仅音乐铺底，原声音量滑条不生效。
     pub mute: bool,
     /// 原声音量百分比 0-100（保留原声混音时生效）。
     pub video_volume: i64,
-    /// 音乐音量百分比 0-100（保留原声混音时生效）。
+    /// 音乐音量百分比 0-100（混音与铺底都生效）。
     pub music_volume: i64,
 }
 
@@ -90,9 +90,13 @@ pub fn build_merge_args(
         m,
     ];
     if opts.mute || !video_has_audio {
-        // 关原声（或源无音轨）：视频流 + 音乐直接铺底（音量滑条此时不生效，保持音乐原音量）。
+        // 关原声（或源无音轨）：仅音乐按滑条音量铺底（音频本来就要重编码 AAC，滤镜无额外代价）。
+        args.extend([
+            "-filter_complex".to_string(),
+            format!("[1:a]volume={:.2}[m]", volume_ratio(opts.music_volume)),
+        ]);
         args.extend(["-map".to_string(), "0:v:0".to_string()]);
-        args.extend(["-map".to_string(), "1:a:0".to_string()]);
+        args.extend(["-map".to_string(), "[m]".to_string()]);
     } else {
         // 保留原声：两路各按滑条音量混音，alimiter 防叠加削波。
         args.extend([

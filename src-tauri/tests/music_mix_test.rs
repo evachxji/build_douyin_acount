@@ -81,7 +81,7 @@ fn fake_exec(calls: &Mutex<Vec<Vec<String>>>) -> impl Fn(&str, &[String]) -> Res
 // ---------- build_merge_args 纯函数 ----------
 
 #[test]
-fn merge_args_mute_maps_video_and_music_only() {
+fn merge_args_mute_applies_music_volume_and_maps_video_only() {
     let args = music_mix::build_merge_args(
         Path::new("v.mp4"),
         Path::new("m.m4a"),
@@ -91,8 +91,9 @@ fn merge_args_mute_maps_video_and_music_only() {
         MUTE,
     );
     let joined = args.join(" ");
-    assert!(!joined.contains("filter_complex"), "关原声不需要混音滤镜: {joined}");
-    assert!(joined.contains("-map 0:v:0 -map 1:a:0"), "只映射视频流+音乐流: {joined}");
+    assert!(joined.contains("[1:a]volume=0.70[m]"), "关原声时音乐按滑条音量铺底: {joined}");
+    assert!(joined.contains("-map 0:v:0 -map [m]"), "只映射视频流+调音量后的音乐流: {joined}");
+    assert!(!joined.contains("amix"), "关原声不做混音: {joined}");
     assert!(joined.contains("-t 12.500"), "音乐裁到视频时长: {joined}");
     assert!(joined.contains("-c:v copy"), "视频流 copy 不重编码: {joined}");
 }
@@ -215,7 +216,8 @@ fn apply_music_first_time_records_origin_and_remerge_uses_origin() {
     let recorded = calls.lock().expect("calls").clone();
     let second_args = &recorded[1];
     assert_eq!(second_args[2], origin_video.to_string_lossy(), "再次合成输入仍是原始视频（不叠音）");
-    assert!(!second_args.join(" ").contains("filter_complex"), "关原声直接铺音乐");
+    let second_joined = second_args.join(" ");
+    assert!(second_joined.contains("[1:a]volume=0.70[m]"), "关原声时音乐按滑条音量铺底: {second_joined}");
 }
 
 // ---------- 删除清理 ----------
