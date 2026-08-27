@@ -49,6 +49,9 @@ pub struct MusicFile {
     pub cover_path: Option<String>,
     /// 所属分类（music_categories 表联出，按剪映栏目顺序；无映射为空 = 「未分类」）。
     pub categories: Vec<String>,
+    /// 时长秒（music_categories 表联出；None 时前端回退 Audio 读头探测——
+    /// 千首级曲库全量探测会让弹窗卡数秒，采集落库时长是主要路径）。
+    pub duration_s: Option<u32>,
 }
 
 /// 列出音乐目录下全部音频文件（按文件名排序，目录不存在/为空返回空列表）。
@@ -76,6 +79,7 @@ pub fn list_music(dir: &Path) -> Vec<MusicFile> {
                 size_bytes: meta.len(),
                 cover_path: None,
                 categories: Vec::new(),
+                duration_s: None,
             })
         })
         .collect();

@@ -28,6 +28,7 @@ impl Database {
         ensure_music_info_column(&conn)?;
         ensure_douyin_posts_violation_columns(&conn)?;
         ensure_music_covers_url_column(&conn)?;
+        ensure_music_categories_duration_column(&conn)?;
         reset_music_covers_not_found_once(&conn)?;
         seed_account_styles(&conn)?;
         Ok(Self {
@@ -106,6 +107,19 @@ fn ensure_music_covers_url_column(conn: &Connection) -> Result<(), DomainError> 
         .collect::<Result<_, _>>()?;
     if !cols.is_empty() && !cols.iter().any(|c| c == "cover_url") {
         conn.execute_batch("ALTER TABLE music_covers ADD COLUMN cover_url TEXT")?;
+    }
+    Ok(())
+}
+
+/// 旧库升级：music_categories 缺 duration_s 列时补上（幂等，每次启动安全）。
+/// 时长随采集落库后，添加音乐弹窗不再为每首歌创建 Audio 实例读头（千首级曲库卡数秒的根因）。
+fn ensure_music_categories_duration_column(conn: &Connection) -> Result<(), DomainError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(music_categories)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    if !cols.is_empty() && !cols.iter().any(|c| c == "duration_s") {
+        conn.execute_batch("ALTER TABLE music_categories ADD COLUMN duration_s INTEGER")?;
     }
     Ok(())
 }

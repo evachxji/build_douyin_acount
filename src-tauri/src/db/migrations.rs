@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS music_categories (
   file_name TEXT NOT NULL,
   category TEXT NOT NULL,
   ordinal INTEGER NOT NULL DEFAULT 0,
+  duration_s INTEGER,
   PRIMARY KEY (song_id, category)
 );
 CREATE INDEX IF NOT EXISTS idx_music_categories_file ON music_categories(file_name);

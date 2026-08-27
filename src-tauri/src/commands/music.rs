@@ -40,8 +40,9 @@ pub fn list_music_files(state: State<AppState>) -> Vec<MusicFile> {
     }
     if let Ok(cats) = crate::music_collect::categories_map(&state.db) {
         for f in &mut files {
-            if let Some(v) = cats.get(&f.file_name) {
+            if let Some((v, dur)) = cats.get(&f.file_name) {
                 f.categories = v.clone();
+                f.duration_s = *dur;
             }
         }
     }

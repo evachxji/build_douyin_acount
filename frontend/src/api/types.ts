@@ -232,6 +232,8 @@ export interface MusicFile {
   cover_path: string | null;
   /** 所属分类（按剪映栏目顺序；空数组 = 未分类）。 */
   categories: string[];
+  /** 时长秒（采集落库；null 时前端回退 Audio 读头探测）。 */
+  duration_s: number | null;
 }
 
 /** 音乐库采集进度（后端 progress 文件原样透传；interrupted 由后端按心跳判定后标注）。 */

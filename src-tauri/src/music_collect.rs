@@ -193,6 +193,8 @@ pub struct SongEntry {
     pub author: String,
     pub cover_url: Option<String>,
     pub preview_url: String,
+    /// 时长秒（API 自带；落库后弹窗不必再创建 Audio 实例读头探测）。
+    pub duration_s: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -226,6 +228,8 @@ struct SongRaw {
     id: u64,
     title: Option<String>,
     author: Option<String>,
+    /// 时长秒。
+    duration: Option<u64>,
     cover_url: Option<CoverUrlRaw>,
     preview_url: Option<String>,
 }
@@ -332,6 +336,7 @@ async fn fetch_songs(
                 author: s.author.unwrap_or_default(),
                 cover_url: s.cover_url.and_then(CoverUrlRaw::best),
                 preview_url,
+                duration_s: s.duration.and_then(|d| u32::try_from(d).ok()),
             });
         }
         if out.len() as u32 >= want || !data.has_more.unwrap_or(false) {
@@ -367,11 +372,14 @@ fn upsert_mapping(
     file_name: &str,
     category: &str,
     ordinal: u32,
+    duration_s: Option<u32>,
 ) -> Result<(), DomainError> {
+    // ON CONFLICT 只更新时长：幂等重跑（全 skip）时顺带把旧行的 NULL 时长回填。
     db.conn().execute(
-        "INSERT OR IGNORE INTO music_categories (song_id, file_name, category, ordinal)
-         VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![song_id.to_string(), file_name, category, ordinal],
+        "INSERT INTO music_categories (song_id, file_name, category, ordinal, duration_s)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(song_id, category) DO UPDATE SET duration_s = excluded.duration_s",
+        rusqlite::params![song_id.to_string(), file_name, category, ordinal, duration_s],
     )?;
     Ok(())
 }
@@ -385,11 +393,17 @@ fn delete_song_rows(db: &Database, song_id: u64) -> Result<(), DomainError> {
     Ok(())
 }
 
-/// file_name → 分类列表（按 ordinal 排序），添加音乐弹窗分类栏目数据源。
-pub fn categories_map(db: &Database) -> Result<HashMap<String, Vec<String>>, DomainError> {
+/// file_name → (分类列表（按 ordinal 排序）, 时长秒)，添加音乐弹窗分类栏目与时长展示数据源。
+pub type CategoriesMap = HashMap<String, (Vec<String>, Option<u32>)>;
+
+/// 聚合中间态（clippy 友好：避免裸写复杂嵌套类型）。
+type CatAggMap = HashMap<String, (Vec<(u32, String)>, Option<u32>)>;
+
+/// 联查 music_categories 并按 file_name 聚合（分类去重保序、时长取首个非 NULL）。
+pub fn categories_map(db: &Database) -> Result<CategoriesMap, DomainError> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT file_name, category, ordinal FROM music_categories ORDER BY ordinal ASC",
+        "SELECT file_name, category, ordinal, duration_s FROM music_categories ORDER BY ordinal ASC",
     )?;
     let rows = stmt
         .query_map([], |r| {
@@ -397,21 +411,27 @@ pub fn categories_map(db: &Database) -> Result<HashMap<String, Vec<String>>, Dom
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, u32>(2)?,
+                r.get::<_, Option<u32>>(3)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
     drop(conn);
-    let mut map: HashMap<String, Vec<(u32, String)>> = HashMap::new();
-    for (file_name, category, ordinal) in rows {
-        map.entry(file_name).or_default().push((ordinal, category));
+    let mut map: CatAggMap = HashMap::new();
+    for (file_name, category, ordinal, duration_s) in rows {
+        let entry = map.entry(file_name).or_default();
+        entry.0.push((ordinal, category));
+        // 同 song 各行时长同值，取首个非 NULL 即可。
+        if entry.1.is_none() {
+            entry.1 = duration_s;
+        }
     }
     Ok(map
         .into_iter()
-        .map(|(k, mut v)| {
-            v.sort_by_key(|(o, _)| *o);
-            v.dedup_by(|a, b| a.1 == b.1);
-            (k, v.into_iter().map(|(_, c)| c).collect())
+        .map(|(k, (mut cats, dur))| {
+            cats.sort_by_key(|(o, _)| *o);
+            cats.dedup_by(|a, b| a.1 == b.1);
+            (k, (cats.into_iter().map(|(_, c)| c).collect(), dur))
         })
         .collect())
 }
@@ -532,7 +552,7 @@ async fn collect_async(
         // 已有有效映射：补缺失分类行 + 补封面，不重复下载。
         if let Some(existing) = song_file_name(db, song.id)? {
             if music_dir.join(&existing).is_file() {
-                upsert_mapping(db, song.id, &existing, category, *ordinal)?;
+                upsert_mapping(db, song.id, &existing, category, *ordinal, song.duration_s)?;
                 if let Some(url) = &song.cover_url {
                     music_covers::upsert_exact_url(db, &existing, url)?;
                 }
@@ -545,7 +565,7 @@ async fn collect_async(
 
         match download_one(&client, &music_dir, song, &mut md5_cache).await {
             Ok((file_name, size)) => {
-                upsert_mapping(db, song.id, &file_name, category, *ordinal)?;
+                upsert_mapping(db, song.id, &file_name, category, *ordinal, song.duration_s)?;
                 if let Some(url) = &song.cover_url {
                     music_covers::upsert_exact_url(db, &file_name, url)?;
                 }

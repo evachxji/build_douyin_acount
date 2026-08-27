@@ -302,6 +302,18 @@ fn collect_full_flow_pagination_dedup_and_mapping() {
         )
         .expect("cover row");
     assert_eq!(cover_status, "URL_READY");
+    drop(conn);
+
+    // 时长随映射落库（弹窗据此免 Audio 探测）。
+    let cats = build_douyin_acount_lib::music_collect::categories_map(&db).expect("categories_map");
+    assert_eq!(
+        cats.get("T1 - A1.m4a"),
+        Some(&(vec!["会员热榜".to_string()], Some(120)))
+    );
+    assert_eq!(
+        cats.get("T3 - A3.m4a"),
+        Some(&(vec!["会员热榜".to_string(), "抖音热门".to_string()], Some(120)))
+    );
 }
 
 #[test]
@@ -312,6 +324,11 @@ fn collect_rerun_is_idempotent_all_skipped() {
     run_collect(&db, &store, 3, &mock.url, &pp, &cancel).expect("first run");
     let audio_after_first = audio_request_count(&mock);
 
+    // 模拟旧库：时长列回填前为 NULL（重跑采集必须顺带回填）。
+    db.conn()
+        .execute("UPDATE music_categories SET duration_s = NULL", [])
+        .expect("null out durations");
+
     run_collect(&db, &store, 3, &mock.url, &pp, &cancel).expect("second run");
     let p = read_progress(&pp);
     assert_eq!(p.stage, "done");
@@ -320,6 +337,17 @@ fn collect_rerun_is_idempotent_all_skipped() {
     assert_eq!(p.skipped, 5, "全部 5 行计划走已有映射跳过");
     assert_eq!(audio_request_count(&mock), audio_after_first, "重跑不发音频请求");
     assert_eq!(mapping_rows(&db).len(), 5);
+
+    // 重跑后 NULL 时长被回填。
+    let null_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM music_categories WHERE duration_s IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count null durations");
+    assert_eq!(null_count, 0, "重跑必须回填全部 NULL 时长");
 }
 
 #[test]

@@ -106,21 +106,41 @@ export function AddMusicDialog({
     if (audioRef.current) audioRef.current.volume = musicVolume / 100;
   }, [mute, videoVolume, musicVolume]);
 
-  // 每首音乐用 preload=metadata 的隐藏 Audio 懒读时长（只取头几 KB，几十首也是毫秒级）。
+  // 时长缺失的音乐（手动放入目录、采集 API 无时长字段、已从剪映列表下线的少数）
+  // 用隐藏 Audio 懒读时长，但**分批进行**（并发上限 24）——采集来的歌时长已随
+  // music_categories 落库直接展示；剩余数百首若同时创建 Audio 实例会抢爆解码器
+  // 资源让弹窗卡数秒（千首级曲库实测）。
   useEffect(() => {
     if (!files) return;
-    const probes: HTMLAudioElement[] = [];
-    for (const f of files) {
-      const a = new Audio();
-      a.preload = "metadata";
-      a.src = audioUrl(f.path);
-      a.onloadedmetadata = () => {
-        setDurations((d) => (f.path in d ? d : { ...d, [f.path]: a.duration }));
-      };
-      probes.push(a);
-    }
+    const pending = files.filter((f) => f.duration_s == null);
+    let cancelled = false;
+    const pool = new Set<HTMLAudioElement>();
+    let idx = 0;
+    const CONCURRENCY = 24;
+    const pump = () => {
+      if (cancelled) return;
+      while (pool.size < CONCURRENCY && idx < pending.length) {
+        const f = pending[idx++];
+        const a = new Audio();
+        a.preload = "metadata";
+        a.src = audioUrl(f.path);
+        pool.add(a);
+        const done = () => {
+          pool.delete(a);
+          a.src = "";
+          pump();
+        };
+        a.onloadedmetadata = () => {
+          setDurations((d) => (f.path in d ? d : { ...d, [f.path]: a.duration }));
+          done();
+        };
+        a.onerror = done;
+      }
+    };
+    pump();
     return () => {
-      probes.forEach((a) => {
+      cancelled = true;
+      pool.forEach((a) => {
         a.src = "";
       });
     };
@@ -410,6 +430,8 @@ export function AddMusicDialog({
                           togglePlay(f.path);
                         }}
                         title={f.file_name}
+                        // 视口外卡片跳过布局/绘制（千首级曲库不卡）；固定占位高防滚动跳动。
+                        style={{ contentVisibility: "auto", containIntrinsicSize: "auto 84px" }}
                         className={`flex h-[84px] cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${
                           active
                             ? "border-accent bg-accent/15 text-accent"
@@ -420,6 +442,7 @@ export function AddMusicDialog({
                           <img
                             src={coverUrl(f.cover_path)}
                             alt=""
+                            loading="lazy"
                             className="h-14 w-14 shrink-0 rounded-md object-cover"
                           />
                         ) : (
@@ -435,8 +458,12 @@ export function AddMusicDialog({
                           {/* 歌名最多两行完整展示，超出才省略 */}
                           <span className="line-clamp-2 leading-snug break-all">{f.name}</span>
                           <span className="mt-1 block text-[11px] text-mute">
-                            {durations[f.path] ? fmtDur(durations[f.path]) : "--:--"} ·{" "}
-                            {formatBytes(f.size_bytes)}
+                            {f.duration_s != null
+                              ? fmtDur(f.duration_s)
+                              : durations[f.path]
+                                ? fmtDur(durations[f.path])
+                                : "--:--"}{" "}
+                            · {formatBytes(f.size_bytes)}
                           </span>
                         </span>
                         <button
