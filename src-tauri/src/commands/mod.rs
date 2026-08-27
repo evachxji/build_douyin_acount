@@ -7,6 +7,7 @@ pub mod content;
 pub mod douyin;
 pub mod ffmpeg;
 pub mod music;
+pub mod music_collect;
 pub mod ollama;
 pub mod publish;
 pub mod settings;

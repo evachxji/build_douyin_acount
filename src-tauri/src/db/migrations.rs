@@ -154,6 +154,18 @@ CREATE TABLE IF NOT EXISTS music_covers (
   queried_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 音乐库采集的分类映射（music_collect）：一首歌可属多个分类（多行），
+-- ordinal 是分类在剪映音乐库栏目里的顺序（弹窗分类栏按它排序）。
+-- song_id 是剪映/抖音 19 位歌曲 id，存 TEXT（超 i64::MAX，禁 f64）。
+CREATE TABLE IF NOT EXISTS music_categories (
+  song_id TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  ordinal INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (song_id, category)
+);
+CREATE INDEX IF NOT EXISTS idx_music_categories_file ON music_categories(file_name);
+
 -- 状态模型重构（第五阶段）：READY -> CANDIDATE；SKIPPED/LOW_PRIORITY -> ELIMINATED
 UPDATE video_assets SET status = 'CANDIDATE' WHERE status = 'READY';
 UPDATE video_assets SET status = 'ELIMINATED' WHERE status IN ('SKIPPED', 'LOW_PRIORITY');

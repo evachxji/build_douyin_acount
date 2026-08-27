@@ -4,6 +4,7 @@ import type { AiProvider, AppSettings, FfmpegStatus, FfmpegUpdateInfo, FfmpegUpd
 import { cleanConditions, formatBytes, formatSpeed } from "../../lib/format";
 import { WhisperModelDialog } from "./WhisperModelDialog";
 import { WhisperModelManager } from "./WhisperModelManager";
+import { MusicCollectCard } from "./MusicCollectCard";
 
 const EMPTY: AppSettings = {
   ollama_url: "",
@@ -36,6 +37,186 @@ const EMPTY: AppSettings = {
   openai_llm_model: "k3-256k",
   publish_declaration: true,
 };
+
+const field =
+  "h-9 w-full rounded border border-line bg-ink px-2 text-sm text-paper focus:border-accent/60 focus:outline-none";
+
+/** 云端 API Key 输入框：右侧眼睛按钮切换明文/密文显示。 */
+function ApiKeyInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="flex gap-1">
+      <input
+        type={show ? "text" : "password"}
+        className={field}
+        value={value}
+        placeholder="sk-..."
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        title={show ? "隐藏密钥" : "显示密钥"}
+        onClick={() => setShow((s) => !s)}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-line text-mute transition-colors hover:text-paper"
+      >
+        {show ? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
+/** 云端供应商 → Base URL 映射（三家均实现 OpenAI 兼容 GET /models，2026-08 实测）。 */
+const CLOUD_PROVIDERS = [
+  { label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" },
+  { label: "Kimi Coding Plan", baseUrl: "https://api.kimi.com/coding/v1" },
+  { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+];
+
+/** 云端 Base URL 下拉框：选中供应商即映射对应 Base URL；
+ *  旧设置里不在映射表的自定义 URL 以「自定义」选项保留原值。 */
+function CloudBaseUrlSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const matched = CLOUD_PROVIDERS.some((p) => p.baseUrl === value);
+  return (
+    <select
+      className={field}
+      value={matched ? value : "__custom__"}
+      onChange={(e) => {
+        if (e.target.value !== "__custom__") onChange(e.target.value);
+      }}
+    >
+      {CLOUD_PROVIDERS.map((p) => (
+        <option key={p.baseUrl} value={p.baseUrl}>
+          {p.label}（{p.baseUrl}）
+        </option>
+      ))}
+      {!matched && <option value="__custom__">自定义（{value}）</option>}
+    </select>
+  );
+}
+
+/** 云端模型名称输入框：下载图标按 baseUrl+apiKey 拉取该供应商可用模型列表；
+ *  成功后右侧出现下拉图标，展开可过滤列表，点选自动填入输入框。 */
+function CloudModelInput({
+  value,
+  onChange,
+  baseUrl,
+  apiKey,
+  models,
+  onFetched,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  baseUrl: string;
+  apiKey: string;
+  models: string[] | undefined;
+  onFetched: (baseUrl: string, models: string[]) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  const fetchModels = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      onFetched(baseUrl, await api.listCloudModels(baseUrl, apiKey));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filtered = (models ?? []).filter((m) =>
+    m.toLowerCase().includes(filter.trim().toLowerCase()),
+  );
+
+  return (
+    <div>
+      <div className="relative flex gap-1">
+        <input className={field} value={value} onChange={(e) => onChange(e.target.value)} />
+        <button
+          type="button"
+          title="拉取可用模型列表"
+          disabled={loading}
+          onClick={fetchModels}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-line text-mute transition-colors hover:text-paper disabled:opacity-50"
+        >
+          {loading ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4 animate-spin">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+          )}
+        </button>
+        {models && (
+          <button
+            type="button"
+            title="从列表选择模型"
+            onClick={() => {
+              setOpen((o) => !o);
+              setFilter("");
+            }}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-line text-mute transition-colors hover:text-paper"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+        )}
+        {open && models && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="absolute left-0 right-0 top-10 z-20 rounded border border-line bg-panel shadow-xl">
+              <div className="border-b border-line p-1">
+                <input
+                  autoFocus
+                  className="h-7 w-full rounded bg-ink px-2 text-xs text-paper focus:outline-none"
+                  placeholder="过滤模型…"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </div>
+              <div className="max-h-60 overflow-y-auto">
+                {filtered.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      onChange(m);
+                      setOpen(false);
+                    }}
+                    className={`block w-full truncate px-2 py-1.5 text-left text-xs hover:bg-accent/10 ${m === value ? "text-accent" : "text-paper"}`}
+                  >
+                    {m}
+                  </button>
+                ))}
+                {filtered.length === 0 && (
+                  <p className="px-2 py-3 text-center text-xs text-mute">无匹配模型</p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      {error && <p className="mt-1 text-xs text-bad">{error}</p>}
+    </div>
+  );
+}
 
 /** 内容筛选：命中/排除条件合并展示。绿 tag=命中条件，红 tag=排除条件；
  *  点击底部按钮在 tag 区就地输入，回车/失焦确认、Esc 取消。 */
@@ -157,6 +338,8 @@ export function SettingsDrawer({
   const [settings, setSettings] = useState<AppSettings>(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [aiTab, setAiTab] = useState<"vision" | "llm" | "asr">("vision");
+  // 云端模型列表缓存（key=baseUrl）：切 tab 不丢，vision/llm 同供应商时共享。
+  const [cloudModels, setCloudModels] = useState<Record<string, string[]>>({});
   const [whisperModels, setWhisperModels] = useState<WhisperModelInfo[]>([]);
   const [whisperDialogFor, setWhisperDialogFor] = useState<string | null>(null);
   const [whisperManagerOpen, setWhisperManagerOpen] = useState(false);
@@ -455,9 +638,6 @@ export function SettingsDrawer({
     }
   };
 
-  const field =
-    "h-9 w-full rounded border border-line bg-ink px-2 text-sm text-paper focus:border-accent/60 focus:outline-none";
-
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm">
       <div className="flex h-full w-2/3 flex-col border-l border-line bg-panel p-5 shadow-2xl">
@@ -519,27 +699,23 @@ export function SettingsDrawer({
               ) : (
                 <>
                   <label className="block">
-                    <span className="text-xs text-mute">云端 Base URL</span>
-                    <input
-                      className={field}
-                      value={settings.openai_vision_base_url}
-                      placeholder="https://api.kimi.com/coding/v1"
-                      onChange={(e) => set({ openai_vision_base_url: e.target.value })}
-                    />
+                    <span className="text-xs text-mute">云端服务商</span>
+                    <CloudBaseUrlSelect value={settings.openai_vision_base_url} onChange={(v) => set({ openai_vision_base_url: v })} />
                   </label>
                   <label className="block">
                     <span className="text-xs text-mute">云端 API Key</span>
-                    <input
-                      type="password"
-                      className={field}
-                      value={settings.openai_vision_api_key}
-                      placeholder="sk-..."
-                      onChange={(e) => set({ openai_vision_api_key: e.target.value })}
-                    />
+                    <ApiKeyInput value={settings.openai_vision_api_key} onChange={(v) => set({ openai_vision_api_key: v })} />
                   </label>
                   <label className="block">
                     <span className="text-xs text-mute">云端视觉模型</span>
-                    <input className={field} value={settings.openai_vision_model} onChange={(e) => set({ openai_vision_model: e.target.value })} />
+                    <CloudModelInput
+                      value={settings.openai_vision_model}
+                      onChange={(v) => set({ openai_vision_model: v })}
+                      baseUrl={settings.openai_vision_base_url}
+                      apiKey={settings.openai_vision_api_key}
+                      models={cloudModels[settings.openai_vision_base_url]}
+                      onFetched={(b, list) => setCloudModels((prev) => ({ ...prev, [b]: list }))}
+                    />
                   </label>
                 </>
               )}
@@ -572,27 +748,23 @@ export function SettingsDrawer({
               ) : (
                 <>
                   <label className="block">
-                    <span className="text-xs text-mute">云端 Base URL</span>
-                    <input
-                      className={field}
-                      value={settings.openai_llm_base_url}
-                      placeholder="https://api.kimi.com/coding/v1"
-                      onChange={(e) => set({ openai_llm_base_url: e.target.value })}
-                    />
+                    <span className="text-xs text-mute">云端服务商</span>
+                    <CloudBaseUrlSelect value={settings.openai_llm_base_url} onChange={(v) => set({ openai_llm_base_url: v })} />
                   </label>
                   <label className="block">
                     <span className="text-xs text-mute">云端 API Key</span>
-                    <input
-                      type="password"
-                      className={field}
-                      value={settings.openai_llm_api_key}
-                      placeholder="sk-..."
-                      onChange={(e) => set({ openai_llm_api_key: e.target.value })}
-                    />
+                    <ApiKeyInput value={settings.openai_llm_api_key} onChange={(v) => set({ openai_llm_api_key: v })} />
                   </label>
                   <label className="block">
                     <span className="text-xs text-mute">云端文本模型</span>
-                    <input className={field} value={settings.openai_llm_model} onChange={(e) => set({ openai_llm_model: e.target.value })} />
+                    <CloudModelInput
+                      value={settings.openai_llm_model}
+                      onChange={(v) => set({ openai_llm_model: v })}
+                      baseUrl={settings.openai_llm_base_url}
+                      apiKey={settings.openai_llm_api_key}
+                      models={cloudModels[settings.openai_llm_base_url]}
+                      onFetched={(b, list) => setCloudModels((prev) => ({ ...prev, [b]: list }))}
+                    />
                   </label>
                 </>
               )}
@@ -828,6 +1000,11 @@ export function SettingsDrawer({
               </div>
             )}
           </div>
+          {/* 音乐库采集：从剪映线上音乐库按分类批量下载（不依赖剪映客户端），
+              完成后刷新上方「已同步 N 首」计数 */}
+          <MusicCollectCard
+            onChanged={() => void api.getMusicStatus().then(setMusicStatus).catch(() => {})}
+          />
           <ConditionTags
             hit={settings.hit_conditions}
             exclude={settings.exclude_conditions}

@@ -33,13 +33,21 @@ pub fn get_music_status(state: State<AppState>) -> MusicStatus {
     status(&state.store)
 }
 
-/// 列出音乐库全部音频文件（添加音乐弹窗的数据源），并联出已匹配的专辑封面。
+/// 列出音乐库全部音频文件（添加音乐弹窗的数据源），并联出已匹配的专辑封面与所属分类
+/// （分类来自 music_categories 表——音乐库采集落库；剪映缓存同步来的歌无分类，弹窗归「未分类」）。
 #[tauri::command]
 pub fn list_music_files(state: State<AppState>) -> Vec<MusicFile> {
     let mut files = music_sync::list_music(&state.store.music_dir());
     if let Ok(covers) = crate::music_covers::cover_map(&state.db) {
         for f in &mut files {
             f.cover_path = covers.get(&f.file_name).cloned();
+        }
+    }
+    if let Ok(cats) = crate::music_collect::categories_map(&state.db) {
+        for f in &mut files {
+            if let Some(v) = cats.get(&f.file_name) {
+                f.categories = v.clone();
+            }
         }
     }
     files
@@ -58,7 +66,7 @@ pub async fn ensure_music_covers(
 
 /// 把选中的音乐合成进素材视频（候选/待发布）。合成是秒级~十秒级 ffmpeg 调用，
 /// 走 spawn_blocking 不占主线程，前端按钮 loading 等待结果即可（无需进度轮询）。
-/// `video_volume`/`music_volume` 为保留原声时的混音增益百分比（0-100）。
+/// `video_volume` 为保留原声时的原声增益百分比（0-100）；`music_volume` 为音乐增益（混音/铺底都生效）。
 #[tauri::command]
 pub async fn add_music_to_video(
     app: tauri::AppHandle,

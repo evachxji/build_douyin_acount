@@ -72,6 +72,8 @@ pub struct MusicFile {
     pub size_bytes: u64,
     /// 专辑封面绝对路径（music_covers 表联出；未匹配到为 None）。
     pub cover_path: Option<String>,
+    /// 所属分类（music_categories 表联出，按剪映栏目顺序；无映射为空 = 「未分类」）。
+    pub categories: Vec<String>,
 }
 
 /// 列出音乐目录下全部音频文件（按文件名排序，目录不存在/为空返回空列表）。
@@ -98,6 +100,7 @@ pub fn list_music(dir: &Path) -> Vec<MusicFile> {
                 path: p.to_string_lossy().into_owned(),
                 size_bytes: meta.len(),
                 cover_path: None,
+                categories: Vec::new(),
             })
         })
         .collect();
@@ -400,7 +403,8 @@ fn load_download_entries(music_cache: &Path) -> Result<Vec<(String, String)>, Do
 }
 
 /// 按文件头探测真实格式：剪映缓存的 .mp3 实际是 M4A(AAC)。
-fn detect_ext(path: &Path) -> Result<String, DomainError> {
+/// （pub(crate)：音乐库采集下载后同样按它定扩展名。）
+pub(crate) fn detect_ext(path: &Path) -> Result<String, DomainError> {
     let mut f = std::fs::File::open(path)?;
     let mut buf = [0u8; 12];
     let n = f.read(&mut buf)?;
@@ -419,7 +423,8 @@ fn detect_ext(path: &Path) -> Result<String, DomainError> {
 }
 
 /// 文件名清洗：非法字符 → `_`，去两端空格与点，截 120 字符，空名兜底 untitled。
-fn sanitize(name: &str) -> String {
+/// （pub(crate)：音乐库采集与剪映缓存同步共用同一命名规则，两来源同内容天然去重。）
+pub(crate) fn sanitize(name: &str) -> String {
     const INVALID: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
     let cleaned: String = name
         .chars()
@@ -434,14 +439,15 @@ fn sanitize(name: &str) -> String {
     }
 }
 
-enum DestAction {
+pub(crate) enum DestAction {
     Copy(PathBuf),
     /// 同内容已存在（携带已存在的目标路径，封面映射要用文件名）。
     Skip(PathBuf),
 }
 
 /// 重名处理：同名同内容（大小+MD5）→ Skip；同名不同内容 → 追加序号 (2)(3)…
-fn pick_dest(
+/// （pub(crate)：音乐库采集落盘复用同一规则。）
+pub(crate) fn pick_dest(
     dest_dir: &Path,
     base: &str,
     ext: &str,
@@ -479,7 +485,7 @@ fn md5_hex(bytes: &[u8]) -> String {
     format!("{:x}", Md5::digest(bytes))
 }
 
-fn md5_file(path: &Path) -> Result<String, DomainError> {
+pub(crate) fn md5_file(path: &Path) -> Result<String, DomainError> {
     let mut f = std::fs::File::open(path)?;
     let mut hasher = Md5::new();
     // 栈上缓冲只能给 64KB：Windows 主线程栈默认 1MB，[0u8; 1<<20] 直接栈溢出

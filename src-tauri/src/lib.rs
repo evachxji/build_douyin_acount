@@ -9,6 +9,7 @@ pub mod media;
 pub mod music_mix;
 pub mod music_sync;
 pub mod music_covers;
+pub mod music_collect;
 pub mod settings;
 pub mod state;
 pub mod tools;
@@ -122,6 +123,9 @@ pub fn run() {
             commands::music::list_music_files,
             commands::music::add_music_to_video,
             commands::music::ensure_music_covers,
+            commands::music_collect::start_music_collect,
+            commands::music_collect::stop_music_collect,
+            commands::music_collect::music_collect_status,
             commands::content::generate_copy,
             commands::content::get_copy,
             commands::content::update_copy,

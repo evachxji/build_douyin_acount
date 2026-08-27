@@ -240,6 +240,33 @@ export interface MusicFile {
   size_bytes: number;
   /** 专辑封面绝对路径（未匹配到为 null）。 */
   cover_path: string | null;
+  /** 所属分类（按剪映栏目顺序；空数组 = 未分类）。 */
+  categories: string[];
+}
+
+/** 音乐库采集进度（后端 progress 文件原样透传；interrupted 由后端按心跳判定后标注）。 */
+export interface MusicCollectProgress {
+  stage:
+    | "fetching"
+    | "downloading"
+    | "done"
+    | "stopped"
+    | "error"
+    | "interrupted";
+  /** 当前分类名。 */
+  category: string;
+  /** 当前分类序号（1 基）与分类总数。 */
+  category_index: number;
+  category_count: number;
+  downloaded: number;
+  skipped: number;
+  failed: number;
+  /** 计划新下载总数（分类歌曲拉完后确定）。 */
+  planned_total: number;
+  bytes_downloaded: number;
+  current_song: string;
+  message: string;
+  updated_at: number;
 }
 
 /** 专辑封面增量匹配结果（iTunes Search API）。 */

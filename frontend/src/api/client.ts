@@ -26,6 +26,7 @@ import type {
   MusicFile,
   CoverReport,
   MusicApplyResult,
+  MusicCollectProgress,
 } from "./types";
 
 /** 后端 DomainError 统一转成的可读错误。 */
@@ -148,6 +149,12 @@ export const api = {
       videoVolume,
       musicVolume,
     }),
+  // 音乐库批量采集（剪映线上 API 按分类下载；专用线程 + progress 轮询，可停止/幂等续采）
+  startMusicCollect: (perCategory?: number) =>
+    call<void>("start_music_collect", { perCategory }),
+  stopMusicCollect: () => call<void>("stop_music_collect"),
+  musicCollectStatus: () =>
+    call<MusicCollectProgress | null>("music_collect_status"),
   listWhisperModels: () => call<WhisperModelInfo[]>("list_whisper_models"),
   startWhisperDownload: (model: string, route: WhisperDownloadRoute) =>
     call<void>("start_whisper_download", { model, route }),
