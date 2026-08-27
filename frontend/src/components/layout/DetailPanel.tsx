@@ -501,7 +501,7 @@ export function DetailPanel() {
 
       </div>
       <div className="flex shrink-0 flex-wrap gap-2 border-t border-line p-4">
-        {asset.status !== "CANDIDATE" && (
+        {asset.status !== "CANDIDATE" && asset.status !== "SELECTED" && (
           <button
             onClick={() => void handleAnalyze()}
             disabled={busy}
