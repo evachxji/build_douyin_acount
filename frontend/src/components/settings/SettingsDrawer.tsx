@@ -218,6 +218,20 @@ function CloudModelInput({
   );
 }
 
+/** 问号浮窗：hover 显示组件作用说明（工具卡片按钮左侧的轻量帮助）。 */
+function HelpTip({ text }: { text: string }) {
+  return (
+    <span className="group relative flex h-7 w-5 items-center justify-center">
+      <span className="flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-mute/50 text-[10px] leading-none text-mute/80">
+        ?
+      </span>
+      <span className="pointer-events-none absolute right-0 top-full z-50 mt-1 hidden w-72 rounded border border-line bg-ink p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal text-paper/90 shadow-xl group-hover:block">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 /** 内容筛选：命中/排除条件合并展示。绿 tag=命中条件，红 tag=排除条件；
  *  点击底部按钮在 tag 区就地输入，回车/失焦确认、Esc 取消。 */
 function ConditionTags({
@@ -849,7 +863,8 @@ export function SettingsDrawer({
                   <span className="ml-2 text-mute/70">检查失败，可点「检查更新」重试</span>
                 )}
               </p>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <HelpTip text="视频下载器。采集任务用它把 TikTok / Instagram Reels 视频下载到本地素材库。程序已内置，无需自行安装；发现新版本时可一键更新。" />
                 <button
                   type="button"
                   disabled={ytdlpChecking || ytdlpActive}
@@ -917,7 +932,8 @@ export function SettingsDrawer({
                   <span className="ml-2 text-mute/70">检查失败，可点「检查更新」重试</span>
                 )}
               </p>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <HelpTip text="音视频处理工具。AI 分析的视频抽帧、素材封面生成、时长探测、「添加音乐」合成都由它完成。程序已内置，无需自行安装；发现新版本时可一键更新。" />
                 <button
                   type="button"
                   disabled={ffmpegChecking || ffmpegActive}
