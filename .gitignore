@@ -27,8 +27,9 @@ pnpm-debug.log*
 *.jpg
 *.jpeg
 *.png
-# README 界面截图例外
+# README 界面截图与项目图标例外
 !docs/images/*.jpg
+!docs/images/*.png
 
 # ---- Secrets ----
 .env
