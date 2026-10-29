@@ -2,7 +2,8 @@
 //!
 //! 合成语义：
 //! - 视频流 copy 不重编码（秒级完成）；音频统一重编码 AAC 192k。
-//! - 音乐用 `-t <视频时长>` 裁到视频长度（音乐更短时尾部自然静音，不做循环）。
+//! - 音乐输入 `-stream_loop -1` 无限循环铺满、`-t <视频时长>` 截断：音乐更短时自动从头循环补足
+//!   （旧行为尾部静音使音轨比视频短，详情页播放器会在音乐结束处卡住）。
 //! - 「关闭原声」或视频本身无音轨：音乐按音乐音量滑条铺底（原声滑条不生效）；
 //!   否则原声与音乐按用户滑条音量（百分比，默认 30%/70%）混音，alimiter 防叠加削波。
 //! - 再次合成从原始视频重来（`music_info.origin_file_path`），不会叠音；
@@ -70,7 +71,7 @@ fn volume_ratio(percent: i64) -> f64 {
 }
 
 /// 合成 ffmpeg 参数（纯函数，测试友好）。
-/// `duration_s` 为源视频时长：`-t` 把音乐裁到该长度。
+/// `duration_s` 为源视频时长：音乐输入循环铺满后由 `-t` 裁到该长度。
 pub fn build_merge_args(
     video: &Path,
     music: &Path,
@@ -82,10 +83,13 @@ pub fn build_merge_args(
     let v = video.to_string_lossy().into_owned();
     let m = music.to_string_lossy().into_owned();
     let o = out.to_string_lossy().into_owned();
+    // -stream_loop -1 是输入选项，只作用于紧随其后的音乐输入：音乐短于视频时从头循环补足。
     let mut args = vec![
         "-y".to_string(),
         "-i".to_string(),
         v,
+        "-stream_loop".to_string(),
+        "-1".to_string(),
         "-i".to_string(),
         m,
     ];

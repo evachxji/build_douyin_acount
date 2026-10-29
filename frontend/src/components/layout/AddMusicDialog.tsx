@@ -11,11 +11,11 @@ const fmtDur = (s: number) =>
 
 /**
  * 添加音乐弹窗：从音乐库（storage/music）选一首合成进视频。
- * 顶部视频预览：点音乐名后视频+音乐同时从头播放、音乐播完同停（视频比音乐短则循环做背景，
- * 不反向掐停音乐），所见即所得——
+ * 顶部视频预览：点音乐名后视频+音乐同时从头播放、音乐循环铺满视频长度（与合成的
+ * -stream_loop -1 一致，音乐短于视频自动从头续播），视频播完两路同停，所见即所得——
  * 勾选「关闭原声」时视频静音（仅音乐发声）；两种模式下音乐都按「音乐音量」滑条发声，
  * 保留原声时原声另按「原声音量」滑条混音预览（与合成参数一致）。
- * 合成走后端 ffmpeg（音乐裁到视频长度）；已合成过的素材预览/再合成均从原始视频来，不叠音。
+ * 合成走后端 ffmpeg（音乐循环铺满后裁到视频长度）；已合成过的素材预览/再合成均从原始视频来，不叠音。
  */
 export function AddMusicDialog({
   asset,
@@ -163,8 +163,9 @@ export function AddMusicDialog({
     const a = new Audio(audioUrl(path));
     // 预览贴合合成结果：音乐始终按滑条音量；关原声时视频侧静音（muted 由上面的 effect 同步）。
     a.volume = musicVolume / 100;
-    // 音乐播完 = 试听结束，两路同停；视频比音乐短则由 loop 循环做背景，不会反向掐停音乐。
-    a.onended = stopPlay;
+    // 音乐循环铺满视频长度（与合成 -stream_loop -1 一致）：音乐短于视频时从头续播，
+    // 试听终点由视频播完（<video> onEnded → stopPlay）统一收尾，不再音乐播完掐停视频。
+    a.loop = true;
     audioRef.current = a;
     const v = videoRef.current;
     if (v) v.currentTime = 0;
@@ -183,15 +184,15 @@ export function AddMusicDialog({
       if (!audioRef.current && selected) {
         const a = new Audio(audioUrl(selected));
         a.volume = musicVolume / 100;
-        a.onended = stopPlay;
+        a.loop = true;
         audioRef.current = a;
         setPlaying(selected);
         try {
-          // 视频自然播完后停在结尾（ended）：再播放会从头开始，音乐也要从 0 起，
-          // 否则 currentTime 落在音乐结尾会立即 ended 闪停。
-          a.currentTime = v.ended ? 0 : v.currentTime;
+          // 视频自然播完后停在结尾（ended）：再播放会从头开始，音乐也要从 0 起；
+          // 音乐循环后对音乐时长取模，视频进度落在音乐长度之外也能对上循环位置。
+          a.currentTime = (v.ended ? 0 : v.currentTime) % (a.duration || Infinity);
         } catch {
-          /* 超出音乐长度时忽略，onended 会统一收尾 */
+          /* metadata 未加载等异常忽略，从头起播 */
         }
         void a.play().catch(() => stopPlay()); // 个别格式（如 wma）播不了：回退静止
       } else if (audioRef.current) {
@@ -204,7 +205,8 @@ export function AddMusicDialog({
     }
   };
 
-  // 拖动进度条定位；音乐试听中同步音乐进度（预览从 0 起播，两路时间轴一致）。
+  // 拖动进度条定位；音乐试听中同步音乐进度（预览从 0 起播，两路时间轴一致；
+  // 音乐循环，对音乐时长取模——拖到音乐长度之外对应循环回来的位置）。
   const seekVideo = (t: number) => {
     const v = videoRef.current;
     if (!v || !Number.isFinite(t)) return;
@@ -212,9 +214,9 @@ export function AddMusicDialog({
     setCurTime(t);
     if (playing && audioRef.current) {
       try {
-        audioRef.current.currentTime = t;
+        audioRef.current.currentTime = t % (audioRef.current.duration || Infinity);
       } catch {
-        /* 超出音乐长度时忽略，onended 会统一收尾 */
+        /* metadata 未加载等异常忽略 */
       }
     }
   };
@@ -259,7 +261,6 @@ export function AddMusicDialog({
                 ref={videoRef}
                 src={previewSrc}
                 muted={mute}
-                loop={playing !== null}
                 onEnded={stopPlay}
                 onClick={toggleVideo}
                 onTimeUpdate={(e) => setCurTime(e.currentTarget.currentTime)}

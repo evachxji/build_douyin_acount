@@ -137,6 +137,30 @@ fn merge_args_no_audio_source_falls_back_to_music_only() {
     assert_eq!(mute_args, no_audio_args);
 }
 
+#[test]
+fn merge_args_loops_music_input_so_short_music_covers_video() {
+    // 30s 视频配 22s 音乐：音乐输入必须循环铺满（否则音轨只有 22s，播放器在音乐结束处卡住）。
+    let args = music_mix::build_merge_args(
+        Path::new("v.mp4"),
+        Path::new("m.m4a"),
+        Path::new("out.mp4"),
+        30.0,
+        true,
+        MIX,
+    );
+    // -stream_loop -1 是输入选项，必须紧跟音乐输入的 -i 之前（只作用于其后第一个输入）。
+    let loop_pos = args.iter().position(|a| a == "-stream_loop").expect("-stream_loop present");
+    assert_eq!(args[loop_pos + 1], "-1", "无限循环");
+    assert_eq!(args[loop_pos + 2], "-i", "循环选项之后是音乐输入: {}", args.join(" "));
+    assert_eq!(args[loop_pos + 3], "m.m4a", "循环只作用于音乐: {}", args.join(" "));
+    // 视频输入在前，不被循环。
+    assert_eq!(args[1], "-i");
+    assert_eq!(args[2], "v.mp4");
+    // -t 仍把输出裁到视频时长。
+    let t_pos = args.iter().position(|a| a == "-t").expect("-t present");
+    assert_eq!(args[t_pos + 1], "30.000");
+}
+
 // ---------- apply_music（假 ffmpeg） ----------
 
 #[test]
@@ -308,4 +332,61 @@ fn real_ffmpeg_merge_trims_music_to_video_duration() {
         .output()
         .expect("probe audio");
     assert!(String::from_utf8_lossy(&probe.stdout).contains("aac"), "输出应有 AAC 音轨");
+}
+
+#[test]
+fn real_ffmpeg_merge_loops_short_music_to_cover_video() {
+    if !has_tool("ffmpeg") || !has_tool("ffprobe") {
+        eprintln!("skipped: ffmpeg/ffprobe not available");
+        return;
+    }
+    let (_dir, db, store) = setup();
+    // 2s 视频（带音轨）配 1s 音乐：音乐必须循环一遍才铺满视频。
+    let video = store.videos_dir().join("real-long.mp4");
+    let ok = Command::new("ffmpeg")
+        .args([
+            "-y", "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=10",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-pix_fmt", "yuv420p",
+        ])
+        .arg(&video)
+        .output()
+        .expect("gen video");
+    assert!(ok.status.success(), "生成测试视频失败");
+    let music = store.music_dir().join("real-short-music.m4a");
+    let ok = Command::new("ffmpeg")
+        .args(["-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=1"])
+        .arg(&music)
+        .output()
+        .expect("gen music");
+    assert!(ok.status.success(), "生成测试音乐失败");
+    let (id, _) = seed_candidate(&db, &store, &video);
+
+    // 关原声铺音乐：输出音轨 = 循环后的音乐。
+    let r = music_mix::apply_music(&db, &store, id, &music, MUTE, &music_mix::ffmpeg_exec)
+        .expect("real merge");
+
+    let out = PathBuf::from(&r.file_path);
+    // 音轨时长 ≈ 视频时长 2s（不循环时音轨只有 1s）。
+    let probe = Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration", "-of", "csv=p=0"])
+        .arg(&out)
+        .output()
+        .expect("probe audio duration");
+    let aduration: f64 = String::from_utf8_lossy(&probe.stdout).trim().parse().expect("audio duration");
+    assert!((1.7..2.4).contains(&aduration), "音轨应循环铺满 ≈2s，实际 {aduration}");
+    // 后半段（1.2s 之后）是循环回来的音乐而非静音：mean_volume 显著高于静音底噪（-91dB）。
+    let vol = Command::new("ffmpeg")
+        .arg("-i")
+        .arg(&out)
+        .args(["-af", "atrim=start=1.2,volumedetect", "-f", "null", "-"])
+        .output()
+        .expect("volumedetect");
+    let stderr = String::from_utf8_lossy(&vol.stderr);
+    let mean: f64 = stderr
+        .lines()
+        .find_map(|l| l.split("mean_volume:").nth(1))
+        .and_then(|s| s.trim().trim_end_matches(" dB").parse().ok())
+        .expect("mean_volume parsed");
+    assert!(mean > -60.0, "后半段应有循环音乐而非静音，mean_volume={mean} dB");
 }
