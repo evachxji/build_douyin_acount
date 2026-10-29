@@ -39,10 +39,11 @@ const session = `dy-pub-${job.draftId}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // opencli CLI 入口候选（nvm 多版本安装下的探测）。
+const USER_HOME = process.env.USERPROFILE ?? "";
 const OPENCLI_ENTRIES = [
-  "C:/Users/<user>/AppData/Local/nvm/v24.14.0/node_modules/@jackwener/opencli/dist/src/main.js",
+  path.join(USER_HOME, "AppData/Local/nvm/v24.14.0/node_modules/@jackwener/opencli/dist/src/main.js"),
   "C:/nvm4w/nodejs/node_modules/@jackwener/opencli/dist/src/main.js",
-  "C:/Users/<user>/AppData/Roaming/npm/node_modules/@jackwener/opencli/dist/src/main.js",
+  path.join(USER_HOME, "AppData/Roaming/npm/node_modules/@jackwener/opencli/dist/src/main.js"),
 ];
 
 class CancelRequested extends Error {}
