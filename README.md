@@ -4,6 +4,35 @@ PC 端 AI 短视频运营助手 —— 从 TikTok / Instagram Reels 采集优质
 
 > 这是一个**人机协作工具**，不是无人值守机器人。涉及账号登录、最终发布等高风险操作均保留人工确认环节。
 
+## 界面预览
+
+<table>
+  <tr>
+    <th align="center">素材库与 AI 分析</th>
+    <th align="center">待发布素材与 AI 文案</th>
+  </tr>
+  <tr>
+    <td><a href="docs/images/library.jpg"><img src="docs/images/library.jpg" width="440" alt="素材库与 AI 分析"></a></td>
+    <td><a href="docs/images/publish.jpg"><img src="docs/images/publish.jpg" width="440" alt="待发布素材与 AI 文案"></a></td>
+  </tr>
+  <tr>
+    <th align="center">发布日历</th>
+    <th align="center">Agent 任务队列</th>
+  </tr>
+  <tr>
+    <td><a href="docs/images/calendar.jpg"><img src="docs/images/calendar.jpg" width="440" alt="发布日历"></a></td>
+    <td><a href="docs/images/tasks.jpg"><img src="docs/images/tasks.jpg" width="440" alt="Agent 任务队列"></a></td>
+  </tr>
+  <tr>
+    <th align="center">设置</th>
+    <th align="center">添加音乐</th>
+  </tr>
+  <tr>
+    <td><a href="docs/images/settings.jpg"><img src="docs/images/settings.jpg" width="440" alt="设置"></a></td>
+    <td><a href="docs/images/music.jpg"><img src="docs/images/music.jpg" width="440" alt="添加音乐"></a></td>
+  </tr>
+</table>
+
 ## 当前进度
 
 - [x] 第一阶段：需求分析与系统架构设计（2026-08-05）
