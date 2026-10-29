@@ -113,6 +113,71 @@ impl CopyGenerator for InlineTagsGenerator {
     }
 }
 
+struct ChineseKeysGenerator;
+
+impl CopyGenerator for ChineseKeysGenerator {
+    fn generate_copy(&self, _s: &str, _c: &str) -> Result<String, DomainError> {
+        // 云端模型在全中文自定义风格 prompt 下偶发输出中文键（2026-09 实测间歇性 missing title）。
+        Ok(r#"{"标题":"手工皮具的独特魅力","正文":"每一针每一线都是心意","话题":["手工","治愈"]}"#
+            .to_string())
+    }
+}
+
+struct NoTitleGenerator;
+
+impl CopyGenerator for NoTitleGenerator {
+    fn generate_copy(&self, _s: &str, _c: &str) -> Result<String, DomainError> {
+        Ok(r#"{"body":"只有正文没有标题","hashtags":["猫"]}"#.to_string())
+    }
+}
+
+/// 跑一个 generate_copy 任务的公共骨架：入队 → claim → 跑 agent。
+fn run_copy_task(
+    db: &Database,
+    asset_id: i64,
+    generator: Arc<dyn CopyGenerator>,
+) -> Result<AgentOutcome, DomainError> {
+    TasksRepo::new(db)
+        .enqueue(
+            "content",
+            "generate_copy",
+            json!({ "asset_id": asset_id, "style": "治愈" }),
+            false,
+        )
+        .expect("enqueue");
+    let task = TasksRepo::new(db).claim_next("content").expect("claim").expect("task");
+    let agent = ContentAgent::new(generator);
+    let store = MediaStore::new(std::env::temp_dir().join("content-test-keys"));
+    let ctx = AgentContext { db, store };
+    agent.run(&ctx, task)
+}
+
+#[test]
+fn content_agent_accepts_chinese_keys_from_cloud_model() {
+    let db = test_db();
+    let asset_id = insert_asset(&db, "皮具制作", "craft", 0);
+    attach_analysis(&db, asset_id, "手工", 88);
+    let outcome = run_copy_task(&db, asset_id, Arc::new(ChineseKeysGenerator)).expect("run");
+    assert!(matches!(outcome, AgentOutcome::Succeeded(_)));
+    let copy = ContentRepo::new(&db).get_by_asset(asset_id).expect("get").expect("copy");
+    assert_eq!(copy.title, "手工皮具的独特魅力");
+    assert_eq!(copy.body, "每一针每一线都是心意");
+    assert_eq!(copy.hashtags, vec!["手工", "治愈"]);
+}
+
+#[test]
+fn content_agent_missing_title_error_includes_raw_excerpt() {
+    // 字段名漂移类故障必须能从报错直接看到模型真实输出，否则无法诊断。
+    let db = test_db();
+    let asset_id = insert_asset(&db, "猫咪", "cat", 0);
+    attach_analysis(&db, asset_id, "宠物", 90);
+    let err = run_copy_task(&db, asset_id, Arc::new(NoTitleGenerator))
+        .expect_err("missing title must fail");
+    let msg = err.to_string();
+    assert!(msg.contains("copy missing title"), "错误类型: {msg}");
+    assert!(msg.contains("只有正文没有标题"), "报错应带模型原文片段: {msg}");
+}
+
 #[test]
 fn content_agent_strips_inline_hashtags_from_body() {
     // 正文里内嵌的 #话题（与 hashtags 一致）必须剥离，标签只保留在最后一行。

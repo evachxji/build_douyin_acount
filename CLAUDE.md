@@ -64,7 +64,7 @@ pnpm build        # tsc 类型检查 + vite 打包（无 eslint，类型检查�
 
 ### 分析管线与状态机
 
-`AnalysisPipeline`（`analysis/pipeline.rs`）= FFmpeg 抽帧 → Whisper ASR → Ollama Vision 逐帧 → LLM 综合成严格 JSON，全部能力抽象为 trait（`FrameExtractor`/`Asr`/`Vision`/`Llm`），测试用桩实现注入。提示词模板在 `resources/prompts/`（`vision-frame.md` 单帧分析、`vision-synthesize.md` 帧+ASR 综合——`docs/04` 列出的 filter/content 提示词不存在，文案生成 prompt 内嵌在 `agents/content.rs`）。
+`AnalysisPipeline`（`analysis/pipeline.rs`）= FFmpeg 抽帧 → Whisper ASR → Ollama Vision 逐帧 → LLM 综合成严格 JSON，全部能力抽象为 trait（`FrameExtractor`/`Asr`/`Vision`/`Llm`），测试用桩实现注入。提示词模板在 `resources/prompts/`（`vision-frame.md` 单帧分析、`vision-synthesize.md` 帧+ASR 综合——`docs/04` 列出的 filter/content 提示词不存在，文案生成 prompt 内嵌在 `agents/content.rs`）。**文案 JSON 解析容错（2026-09 踩坑）**：云端 k3 在全中文自定义风格 prompt 下间歇性输出中文键/大写键（`{"标题":...}`），`parse_copy` 只认 `title` 导致 `copy missing title` 批量失败——解析按候选键名取（title/Title/标题、body/Body/正文/content、hashtags/Hashtags/话题/tags），且解析失败报错必须带模型原文截断片段（`raw_excerpt` 200 字），否则字段漂移无法诊断。
 
 资产状态机：`NEW → ANALYZING → CANDIDATE / ELIMINATED → SELECTED → PUBLISHED`（另有 `LOW_PRIORITY` / `SKIPPED` 等）。Filter 判定顺序：排除条件命中 → 淘汰；命中条件全未命中 → 淘汰；`quality_score < quality_min_keep` → LOW_PRIORITY。命中/排除条件由用户在设置页配置（空列表 = 不限制），LLM 逐条判定结果存 `analysis_results.condition_results_json`。
 

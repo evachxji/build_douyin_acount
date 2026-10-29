@@ -96,31 +96,43 @@ fn strip_inline_hashtags(body: &str, hashtags: &[String]) -> String {
         .to_string()
 }
 
-/// 解析并校验 LLM 输出的文案 JSON。
-fn parse_copy(raw: &str) -> Result<(String, String, Vec<String>), DomainError> {
-    let value: serde_json::Value = serde_json::from_str(raw)
-        .map_err(|e| DomainError::InvalidData(format!("copy json invalid: {e}")))?;
-    let title: String = value
-        .get("title")
-        .and_then(|v| v.as_str())
+/// 从 JSON 对象按候选键名取第一个非空字符串。
+/// 云端模型在全中文自定义风格 prompt 下偶发输出中文键/大写键（{"标题":...}），只认 title 会漏。
+fn pick_str(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|k| value.get(*k).and_then(|v| v.as_str()))
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| DomainError::InvalidData("copy missing title".to_string()))?;
-    let body: String = value
-        .get("body")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    let hashtags: Vec<String> = value
-        .get("hashtags")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
+}
+
+/// 从 JSON 对象按候选键名取字符串数组（话题键同理有中英文变体）。
+fn pick_str_arr(value: &serde_json::Value, keys: &[&str]) -> Option<Vec<String>> {
+    keys.iter().find_map(|k| {
+        value.get(*k).and_then(|v| v.as_array()).map(|arr| {
             arr.iter()
                 .filter_map(|t| t.as_str().map(|s| s.trim_matches('#').trim().to_string()))
                 .filter(|s| !s.is_empty())
                 .collect()
         })
-        .unwrap_or_default();
+    })
+}
+
+/// 报错附模型原文截断片段：字段名漂移类故障必须能直接看到模型真实输出。
+fn raw_excerpt(raw: &str) -> String {
+    raw.chars().take(200).collect()
+}
+
+/// 解析并校验 LLM 输出的文案 JSON。
+fn parse_copy(raw: &str) -> Result<(String, String, Vec<String>), DomainError> {
+    let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
+        DomainError::InvalidData(format!("copy json invalid: {e}; raw: {}", raw_excerpt(raw)))
+    })?;
+    let title = pick_str(&value, &["title", "Title", "标题"]).ok_or_else(|| {
+        DomainError::InvalidData(format!("copy missing title; raw: {}", raw_excerpt(raw)))
+    })?;
+    let body = pick_str(&value, &["body", "Body", "正文", "content"]).unwrap_or_default();
+    let hashtags =
+        pick_str_arr(&value, &["hashtags", "Hashtags", "话题", "tags"]).unwrap_or_default();
     let body = strip_inline_hashtags(&body, &hashtags);
     // 抖音标题上限 30 字符
     let title: String = title.chars().take(30).collect();
