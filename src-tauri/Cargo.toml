@@ -1,6 +1,6 @@
 [package]
 name = "build_douyin_acount"
-version = "0.1.0"
+version = "1.0.0"
 description = "PC 端 AI 短视频运营助手（人机协作）"
 authors = ["evachxji"]
 edition = "2021"
